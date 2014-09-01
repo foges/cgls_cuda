@@ -17,7 +17,7 @@ To solve a least squares problem where the matrix is stored in double precision 
 int flag = cgls::solve<double, cgls::CSR>(val, row_ptr, col_ind, m, n, nnz, b, x, shift, tol, maxit, quiet);
 ```
 The arguments are (note that all arrays must be in GPU memory):
-  + `(double*) val`: Array of double precision matrix entries. The length should be `nnz`.
+  + `(double*) val`: Array of matrix entries. The length should be `nnz`.
   + `(int*) row_ptr`: Array of row pointers. The length should be `m+1`.
   + `(int*) col_ind`: Array of column indicies. The length should be `nnz`.
   + `(int) m`: Number of rows in `A`.
