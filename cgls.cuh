@@ -162,6 +162,8 @@ cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
 }
 
 // Conjugate Gradient Least Squares.
+// TODO(chris): Add version with A and A^T.
+// TODO(chris): Check cuda errors.
 template <typename T, CGLS_FMT F>
 INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
           cusparseMatDescr_t descr, const T *val, const INT *ptr,
