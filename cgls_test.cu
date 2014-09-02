@@ -75,7 +75,7 @@ void test1() {
   for (int i = 0; i < n; ++i)
     err += (x_h[i] - x_star[i]) * (x_h[i] - x_star[i]);
   err = std::sqrt(err);
-  if (flag == 1 && err < tol)
+  if (flag == 0 && err < tol)
     printf("Test1 Passed: Flag = %d, Error = %e\n", flag, err);
   else
     printf("Test1 Failed: Flag = %d, Error = %e\n", flag, err);
@@ -141,7 +141,7 @@ void test2() {
   for (int i = 0; i < n; ++i)
     err += (x_h[i] - x_star[i]) * (x_h[i] - x_star[i]);
   err = std::sqrt(err);
-  if (flag == 1 && err < tol)
+  if (flag == 0 && err < tol)
     printf("Test2 Passed: Flag = %d, Error = %e\n", flag, err);
   else
     printf("Test2 Failed: Flag = %d, Error = %e\n", flag, err);
@@ -195,7 +195,7 @@ void test3() {
       nnz, b_d, x_d, shift, tol, maxit, quiet);
 
   // Check Result
-  if (flag == 1)
+  if (flag == 0)
     printf("Test3 Passed: Flag = %d\n", flag);
   else
     printf("Test3 Failed: Flag = %d\n", flag);

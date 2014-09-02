@@ -41,7 +41,8 @@
 //  quiet      - Disable printing to console.
 //
 //  Returns:
-//  1 => CGLS converged to the desired tolerance tol within maxit iterations.
+//  0 => CGLS converged to the desired tolerance tol within maxit iterations.
+//  1 => The vector b had norm less than eps, solution likely x = 0.
 //  2 => CGLS iterated maxit times but did not converge.
 //  3 => Matrix (A'*A + shift*I) seems to be singular or indefinite.
 //  4 => Likely instable, (A'*A + shift*I) indefinite and norm(x) decreased.
