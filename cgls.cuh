@@ -206,6 +206,9 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
   cudaDeviceSynchronize();
   xmax = normx;
 
+  if (norms < kEps)
+    flag = 1;
+
   if (!quiet)
     printf("    k     normx        resNE\n");
 
@@ -252,9 +255,11 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
     nrm2(handle_b, n, x, 1, &normx);
     cudaDeviceSynchronize();
     xmax = std::max(xmax, normx);
-    flag = (norms <= norms0 * tol) || (normx * tol >= 1);
-    if (!quiet)
+    bool converged = (norms <= norms0 * tol) || (normx * tol >= 1);
+    if (!quiet && (converged || k % 10 == 0))
       printf(fmt, k, normx, norms / norms0); 
+    if (converged)
+      break;
   }
 
   // Determine exit status.
