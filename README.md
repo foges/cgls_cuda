@@ -26,24 +26,22 @@ In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e
 To solve a least squares problem where the matrix is stored in double precision CSR format, use the syntax
 
 ```
-int flag = cgls::solve<double, cgls::CSR>(val, row_ptr, col_ind, m, n, nnz, b, x, shift, tol, maxit, quiet);
+cgls::solve<double, cgls::CSR>(val, rptr, cind, m, n, nnz, b, x, s, tol, maxit, quiet);
 ```
 The arguments are (note that all arrays must be in GPU memory):
   + `(double*) val`: Array of matrix entries. The length should be `nnz`.
-  + `(int*) row_ptr`: Array of row pointers. The length should be `m+1`.
-  + `(int*) col_ind`: Array of column indicies. The length should be `nnz`.
+  + `(int*) rptr`: Array of row pointers. The length should be `m+1`.
+  + `(int*) cind`: Array of column indicies. The length should be `nnz`.
   + `(int) m`: Number of rows in `A`.
   + `(int) n`: Number of columns in `A`.
   + `(int) nnz`: Number of non-zero entries in `A`.
   + `(double*) b`: Left-hand-side array. The length should be `m`.
   + `(double*) x`: Pointer to where the solution should be stored and at the same time it serves as an initial guess. It is very important to initialize `x` (eg. to 0) before calling the solver.
-  + `(double) shift`: Shift term (the same as `s` in the objective function.
+  + `(double) s`: Shift term (the same as `s` in the objective function).
   + `(double) tol`: Relative tolerance to which the problem should be solved (recommended 1e-6).
   + `(int) maxit`: Maximum number of iterations before the solver stops (recommended 20-100, but it depends heavily on the condition number of `A`).
   + `(bool) quiet`: Disables output to the console if set to `true`.
 
-Returns:
-  + `(int) flag`: Status of the solver upon exiting (see `cgls.cuh` for an explanation of the error codes).
 
 ###Requirements
 
