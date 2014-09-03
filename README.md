@@ -11,7 +11,7 @@ by using the [Conjugate Gradient method](http://en.wikipedia.org/wiki/Conjugate_
 
 ###Performance
 
-CGLS was run on two of the largest non-square sparse matrices in [Tim Davis' sparse matrix collection](http://www.cise.ufl.edu/research/sparse/matrices) on an Nvidia Tesla K40c. 
+CGLS was run on two of the largest non-square matrices in [Tim Davis' sparse matrix collection](http://www.cise.ufl.edu/research/sparse/matrices) on an Nvidia Tesla K40c. 
 
 | Matrix Name          |  Dimensions      | Non-Zeros      | Iterations | Time  |
 |----------------------|:----------------:|----------------|------------|-------|
