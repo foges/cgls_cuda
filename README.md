@@ -26,7 +26,7 @@ In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e
 To solve a least squares problem where the matrix is stored in double precision CSR format, use the syntax
 
 ```
-cgls::solve<double, cgls::CSR>(val, rptr, cind, m, n, nnz, b, x, s, tol, maxit, quiet);
+cgls::solve<double, cgls::CSR>(val, rptr, cind, m, n, nnz, b, x, s, tol, maxit, quiet)
 ```
 The arguments are (note that all arrays must be in GPU memory):
   + `(double*) val`: Array of matrix entries. The length should be `nnz`.
