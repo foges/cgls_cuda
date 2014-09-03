@@ -152,17 +152,6 @@ void test2() {
   cudaFree(cind_d);
 }
 
-#ifndef asdf
-#define asdf
-#define cudaCheckError() {                                          \
- cudaError_t e=cudaGetLastError();                                 \
- if(e!=cudaSuccess) {                                              \
-   printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
-   exit(0); \
- }                                                                 \
-}
-#endif
-
 // Test CGLS on larger random matrix.
 void test3() {
   // Initialize variables.
@@ -191,51 +180,33 @@ void test3() {
   int *cind_a_d, *rptr_a_d;
 
   cudaMalloc(&val_a_d, nnz * sizeof(real_t));
-  cudaCheckError();
   cudaMalloc(&x_d, n * sizeof(real_t));
-  cudaCheckError();
   cudaMalloc(&b_d, m * sizeof(real_t));
-  cudaCheckError();
   cudaMalloc(&cind_a_d, nnz * sizeof(int));
-  cudaCheckError();
   cudaMalloc(&rptr_a_d, (m + 1) * sizeof(int));
-  cudaCheckError();
 
   cudaMemcpy(val_a_d, val_h, nnz * sizeof(real_t), cudaMemcpyHostToDevice);
-  cudaCheckError();
   cudaMemcpy(b_d, b_h, m * sizeof(real_t), cudaMemcpyHostToDevice);
-  cudaCheckError();
   cudaMemcpy(x_d, x_h, n * sizeof(real_t), cudaMemcpyHostToDevice);
-  cudaCheckError();
   cudaMemcpy(cind_a_d, cind_h, nnz * sizeof(int), cudaMemcpyHostToDevice);
-  cudaCheckError();
   cudaMemcpy(rptr_a_d, rptr_h, (m + 1) * sizeof(int), cudaMemcpyHostToDevice);
-  cudaCheckError();
 
   // Make A^T copy.
   real_t *val_at_d;
   int *cind_at_d, *rptr_at_d;
 
   cudaMalloc(&val_at_d, nnz * sizeof(real_t));
-  cudaCheckError();
   cudaMalloc(&cind_at_d, nnz * sizeof(int));
-  cudaCheckError();
   cudaMalloc(&rptr_at_d, (n + 1) * sizeof(int));
-  cudaCheckError();
   rptr_at_d = cind_at_d + nnz;
 
   cusparseHandle_t handle_s;
-  cudaCheckError();
   cusparseCreate(&handle_s);
-  cudaCheckError();
   csr2csc(handle_s, m, n, nnz, val_a_d, rptr_a_d, cind_a_d, val_at_d,
       cind_at_d, rptr_at_d, CUSPARSE_ACTION_NUMERIC,
       CUSPARSE_INDEX_BASE_ZERO);
-  cudaCheckError();
   cudaDeviceSynchronize();
-  cudaCheckError();
   cusparseDestroy(handle_s);
-  cudaCheckError();
 
   // Solve.
   int flag = cgls::solve<real_t, cgls::CSR>(val_a_d, rptr_a_d, cind_a_d,
