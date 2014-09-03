@@ -1,6 +1,6 @@
 
 test: cgls_test.cu cgls.cuh
-	nvcc -m64 -arch=sm_30 -o $@ -lcublas -lcusparse -L/usr/local/cuda/lib64/ $<
+	nvcc -O3 -m64 -arch=sm_30 -o $@ -lcublas -lcusparse -L/usr/local/cuda/lib64/ $<
 	./test
 
 clean:
