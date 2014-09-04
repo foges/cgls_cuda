@@ -86,17 +86,18 @@
 
 namespace cgls {
 
-// Data type for indices.
-typedef int INT;
-
 // Data type for sparse format.
-enum CGLS_FMT { CSC, CSR };
+enum CGLS_SPFMT { CSC, CSR };
+
+// Data type for indices. Don't change this unless Nvidia some day
+// changes their API (a la MKL).
+typedef int INT;
 
 // Templated BLAS operations. Skip this part if you're looking for CGLS.
 namespace {
 
 // Sparse matrix-vector multiply templates.
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 cusparseStatus_t spmv(cusparseHandle_t handle, cusparseOperation_t transA,
                       INT m, INT n, INT nnz, const T *alpha,
                       cusparseMatDescr_t descrA, const T *val, const INT *ptr,
@@ -110,9 +111,8 @@ cusparseStatus_t spmv<double, CSR>(cusparseHandle_t handle,
                                    const INT *ptr, const INT *ind,
                                    const double *x, const double *beta,
                                    double *y) {
-  return cusparseDcsrmv(handle, transA, static_cast<int>(m),
-      static_cast<int>(n), static_cast<int>(nnz), alpha, descrA, val,
-      static_cast<const int*>(ptr), static_cast<const int*>(ind), x, beta, y);
+  return cusparseDcsrmv(handle, transA, m, n, nnz, alpha, descrA, val, ptr,
+      ind, x, beta, y);
 }
 
 template <>
@@ -127,9 +127,8 @@ cusparseStatus_t spmv<double, CSC>(cusparseHandle_t handle,
     transA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   else
     transA = CUSPARSE_OPERATION_TRANSPOSE;
-  return cusparseDcsrmv(handle, transA, static_cast<int>(n),
-      static_cast<int>(m), static_cast<int>(nnz), alpha, descrA, val,
-      static_cast<const int*>(ptr), static_cast<const int*>(ind), x, beta, y);
+  return cusparseDcsrmv(handle, transA, n, m, nnz, alpha, descrA, val, ptr,
+      ind, x, beta, y);
 }
 
 template <>
@@ -140,9 +139,8 @@ cusparseStatus_t spmv<float, CSR>(cusparseHandle_t handle,
                                   const INT *ptr, const INT *ind,
                                   const float *x, const float *beta,
                                   float *y) {
-  return cusparseScsrmv(handle, transA, static_cast<int>(m),
-      static_cast<int>(n), static_cast<int>(nnz), alpha, descrA, val,
-      static_cast<const int*>(ptr), static_cast<const int*>(ind), x, beta, y);
+  return cusparseScsrmv(handle, transA, m, n, nnz, alpha, descrA, val, ptr,
+      ind, x, beta, y);
 }
 
 template <>
@@ -157,22 +155,19 @@ cusparseStatus_t spmv<float, CSC>(cusparseHandle_t handle,
     transA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   else
     transA = CUSPARSE_OPERATION_TRANSPOSE;
-  return cusparseScsrmv(handle, transA, static_cast<int>(n),
-      static_cast<int>(m), static_cast<int>(nnz), alpha, descrA, val,
-      static_cast<const int*>(ptr), static_cast<const int*>(ind), x, beta, y);
+  return cusparseScsrmv(handle, transA, n, m, nnz, alpha, descrA, val, ptr,
+      ind, x, beta, y);
 }
 
 // AXPY function.
 cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
                     const double *x, INT incx, double *y, INT incy) {
-  return cublasDaxpy(handle, static_cast<int>(n), alpha, x,
-      static_cast<int>(incx), y, static_cast<int>(incy));
+  return cublasDaxpy(handle, n, alpha, x, incx, y, incy);
 }
 
 cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
                     const float *x, INT incx, float *y, INT incy) {
-  return cublasSaxpy(handle, static_cast<int>(n), alpha, x,
-      static_cast<int>(incx), y, static_cast<int>(incy));
+  return cublasSaxpy(handle, n, alpha, x, incx, y, incy);
 }
 
 // 2-Norm based on thrust.
@@ -196,7 +191,7 @@ void nrm2(INT n, const T *x, T *result) {
 // Conjugate Gradient Least Squares. This version depends only on the matrix
 // A and may in practice be much slower than the version using A and A^T
 // separately. This is because of constant memory allocation and freeing.
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
           cusparseMatDescr_t descr, const T *val, const INT *ptr,
           const INT *ind, const INT m, const INT n, const INT nnz, const T *b,
@@ -312,7 +307,7 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 }
 
 // CGLS, with pre-initialized cusparseHandle and cublasHandle.
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 INT solve(cusparseMatDescr_t descr, const T *val, const INT *ptr,
           const INT *ind, const INT m, const INT n, const INT nnz,
           const T *b, T *x, const T shift, const T tol, const INT maxit,
@@ -330,7 +325,7 @@ INT solve(cusparseMatDescr_t descr, const T *val, const INT *ptr,
 }
 
 // CGLS, with pre-initialized cusparseMatDescr, cusparseHandle and cublasHandle.
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 INT solve(const T *val, const INT *ptr, const INT *ind, const INT m,
           const INT n, const INT nnz, const T *b, T *x, const T shift,
           const T tol, const INT maxit, bool quiet) {
@@ -349,7 +344,7 @@ INT solve(const T *val, const INT *ptr, const INT *ind, const INT m,
 }
 
 // This version requires both A and A^T
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
           cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
           const INT *ind_a, const T *val_at, const INT *ptr_at,
@@ -468,7 +463,7 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 }
 
 // CGLS, with pre-initialized cusparseHandle and cublasHandle.
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 INT solve(cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
           const INT *ind_a, const T *val_at, const INT *ptr_at,
           const INT *ind_at, const INT m, const INT n, const INT nnz,
@@ -487,7 +482,7 @@ INT solve(cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
 }
 
 // CGLS, with pre-initialized cusparseMatDescr, cusparseHandle and cublasHandle.
-template <typename T, CGLS_FMT F>
+template <typename T, CGLS_SPFMT F>
 INT solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
           const INT *ptr_at, INT *ind_at, const INT m, const INT n,
           const INT nnz, const T *b, T *x, const T shift, const T tol,
