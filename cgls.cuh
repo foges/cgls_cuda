@@ -211,9 +211,9 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 
   // Memory Allocation.
   cudaMalloc(&p, n * sizeof(T));
-  cudaMalloc(&s, n * sizeof(T));
   cudaMalloc(&q, m * sizeof(T));
   cudaMalloc(&r, m * sizeof(T));
+  cudaMalloc(&s, n * sizeof(T));
 
   cudaMemcpy(r, b, m * sizeof(T), cudaMemcpyDeviceToDevice);
   cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
@@ -303,6 +303,9 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 
   // Free variables and return;
   cudaFree(p);
+  cudaFree(q);
+  cudaFree(r);
+  cudaFree(s);
   return flag;
 }
 
@@ -320,7 +323,6 @@ INT solve(cusparseMatDescr_t descr, const T *val, const INT *ptr,
       x, shift, tol, maxit, quiet);
   cusparseDestroy(handle_s);
   cublasDestroy(handle_b);
-  cusparseDestroyMatDescr(descr);
   return flag;
 }
 
@@ -331,9 +333,9 @@ INT solve(const T *val, const INT *ptr, const INT *ind, const INT m,
           const T tol, const INT maxit, bool quiet) {
   cusparseHandle_t handle_s;
   cublasHandle_t handle_b;
+  cusparseMatDescr_t descr;
   cusparseCreate(&handle_s);
   cublasCreate(&handle_b);
-  cusparseMatDescr_t descr;
   cusparseCreateMatDescr(&descr);
   int flag = solve<T, F>(handle_s, handle_b, descr, val, ptr, ind, m, n, nnz, b,
       x, shift, tol, maxit, quiet);
@@ -366,9 +368,9 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 
   // Memory Allocation.
   cudaMalloc(&p, n * sizeof(T));
-  cudaMalloc(&s, n * sizeof(T));
   cudaMalloc(&q, m * sizeof(T));
   cudaMalloc(&r, m * sizeof(T));
+  cudaMalloc(&s, n * sizeof(T));
 
   cudaMemcpy(r, b, m * sizeof(T), cudaMemcpyDeviceToDevice);
   cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
@@ -459,6 +461,9 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 
   // Free variables and return;
   cudaFree(p);
+  cudaFree(q);
+  cudaFree(r);
+  cudaFree(s);
   return flag;
 }
 
@@ -477,7 +482,6 @@ INT solve(cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
       ptr_at, ind_at, m, n, nnz, b, x, shift, tol, maxit, quiet);
   cusparseDestroy(handle_s);
   cublasDestroy(handle_b);
-  cusparseDestroyMatDescr(descr);
   return flag;
 }
 
@@ -489,9 +493,9 @@ INT solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
           const INT maxit, bool quiet) {
   cusparseHandle_t handle_s;
   cublasHandle_t handle_b;
+  cusparseMatDescr_t descr;
   cusparseCreate(&handle_s);
   cublasCreate(&handle_b);
-  cusparseMatDescr_t descr;
   cusparseCreateMatDescr(&descr);
   int flag = solve<T, F>(handle_s, handle_b, descr, val_a, ptr_a, ind_a, val_at,
       ptr_at, ind_at, m, n, nnz, b, x, shift, tol, maxit, quiet);
