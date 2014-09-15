@@ -87,7 +87,7 @@
 namespace cgls {
 
 // Data type for sparse format.
-enum CGLS_SPFMT { CSC, CSR };
+enum CGLS_ORD { CSC, CSR };
 
 // Data type for indices. Don't change this unless Nvidia some day
 // changes their API (a la MKL).
@@ -97,7 +97,7 @@ typedef int INT;
 namespace {
 
 // Sparse matrix-vector multiply templates.
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 cusparseStatus_t spmv(cusparseHandle_t handle, cusparseOperation_t transA,
                       INT m, INT n, INT nnz, const T *alpha,
                       cusparseMatDescr_t descrA, const T *val, const INT *ptr,
@@ -191,7 +191,7 @@ void nrm2(INT n, const T *x, T *result) {
 // Conjugate Gradient Least Squares. This version depends only on the matrix
 // A and may in practice be much slower than the version using A and A^T
 // separately. This is because of constant memory allocation and freeing.
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
           cusparseMatDescr_t descr, const T *val, const INT *ptr,
           const INT *ind, const INT m, const INT n, const INT nnz, const T *b,
@@ -310,7 +310,7 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 }
 
 // CGLS, with pre-initialized cusparseHandle and cublasHandle.
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 INT solve(cusparseMatDescr_t descr, const T *val, const INT *ptr,
           const INT *ind, const INT m, const INT n, const INT nnz,
           const T *b, T *x, const T shift, const T tol, const INT maxit,
@@ -327,7 +327,7 @@ INT solve(cusparseMatDescr_t descr, const T *val, const INT *ptr,
 }
 
 // CGLS, with pre-initialized cusparseMatDescr, cusparseHandle and cublasHandle.
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 INT solve(const T *val, const INT *ptr, const INT *ind, const INT m,
           const INT n, const INT nnz, const T *b, T *x, const T shift,
           const T tol, const INT maxit, bool quiet) {
@@ -346,7 +346,7 @@ INT solve(const T *val, const INT *ptr, const INT *ind, const INT m,
 }
 
 // This version requires both A and A^T
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
           cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
           const INT *ind_a, const T *val_at, const INT *ptr_at,
@@ -468,7 +468,7 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 }
 
 // CGLS, with pre-initialized cusparseHandle and cublasHandle.
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 INT solve(cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
           const INT *ind_a, const T *val_at, const INT *ptr_at,
           const INT *ind_at, const INT m, const INT n, const INT nnz,
@@ -486,7 +486,7 @@ INT solve(cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
 }
 
 // CGLS, with pre-initialized cusparseMatDescr, cusparseHandle and cublasHandle.
-template <typename T, CGLS_SPFMT F>
+template <typename T, CGLS_ORD F>
 INT solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
           const INT *ptr_at, INT *ind_at, const INT m, const INT n,
           const INT nnz, const T *b, T *x, const T shift, const T tol,
