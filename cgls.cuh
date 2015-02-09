@@ -114,20 +114,21 @@
 #include <thrust/transform_reduce.h>
 
 #include <algorithm>
+#include <limits>
 
 // Macro to check for CUDA errors.
 #ifndef CGLS_DISABLE_ERROR_CHECK
-#define CLGS_CUDA_CHECK_ERR() \
+#define CGLS_CUDA_CHECK_ERR() \
   do { \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
-      std::cout << __FILE__ << ":" << __LINE__ << ":" <<  __func__ << "\n" \
-                << "ERROR_CUDA: " << cudaGetErrorString(err) <<  std::endl; \
+      printf("%s:%d:%s\nERROR_CUDA: %s\n", __FILE__, __LINE__, __func__, \
+             cudaGetErrorString(err)); \
       exit(EXIT_FAILURE); \
     } \
   } while (0)
 #else
-#define CLGS_CUDA_CHECK_ERR()
+#define CGLS_CUDA_CHECK_ERR()
 #endif
 
 namespace cgls {
@@ -157,7 +158,6 @@ inline cusparseOperation_t OpToCusparseOp(char op) {
       ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
 }
 
-
 // Sparse matrix-vector multiply templates.
 template <typename T, CGLS_ORD O>
 class Spmv : Gemv<T> {
@@ -174,23 +174,24 @@ class Spmv : Gemv<T> {
       : _m(m), _n(n), _nnz(nnz), _val(val), _ptr(ptr), _ind(ind) {
     cusparseCreate(&_handle);
     cusparseCreateMatDescr(&_descr);
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
   }
   ~Spmv() {
     cusparseDestroy(_handle);
     cusparseDestroyMatDescr(_descr);
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
   }
   int operator()(char op, const T alpha, const T *x, const T beta, T *y) const;
 };
 
+// Double CSR and CSC.
 template <>
 inline int Spmv<double, CSR>::operator()(char op, const double alpha,
                                          const double *x, const double beta,
                                          double *y) const {
   cusparseStatus_t err = cusparseDcsrmv(_handle, OpToCusparseOp(op), _m, _n,
       _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return err != CUSPARSE_STATUS_SUCCESS;
 }
 
@@ -205,17 +206,18 @@ inline int Spmv<double, CSC>::operator()(char op, const double alpha,
     cu_op = CUSPARSE_OPERATION_TRANSPOSE;
   cusparseStatus_t err = cusparseDcsrmv(_handle, cu_op, _n, _m, _nnz, &alpha,
       _descr, _val, _ptr, _ind, x, &beta, y);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return err != CUSPARSE_STATUS_SUCCESS;
 }
 
+// Float CSR and CSC.
 template <>
 inline int Spmv<float, CSR>::operator()(char op, const float alpha,
                                         const float *x, const float beta,
                                         float *y) const {
   cusparseStatus_t err = cusparseScsrmv(_handle, OpToCusparseOp(op), _m, _n,
       _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return err != CUSPARSE_STATUS_SUCCESS;
 }
 
@@ -230,8 +232,60 @@ inline int Spmv<float, CSC>::operator()(char op, const float alpha,
     cu_op = CUSPARSE_OPERATION_TRANSPOSE;
   cusparseStatus_t err = cusparseScsrmv(_handle, cu_op, _n, _m, _nnz, &alpha,
       _descr, _val, _ptr, _ind, x, &beta, y);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return err;
+}
+
+// Double Complex CSR and CSC.
+template <>
+inline int Spmv<cuDoubleComplex, CSR>::
+    operator()(char op, const cuDoubleComplex alpha, const cuDoubleComplex *x,
+               const cuDoubleComplex beta, cuDoubleComplex *y) const {
+  cusparseStatus_t err = cusparseZcsrmv(_handle, OpToCusparseOp(op), _m, _n,
+      _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
+  CGLS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
+}
+
+template <>
+inline int Spmv<cuDoubleComplex, CSC>::
+    operator()(char op, const cuDoubleComplex alpha, const cuDoubleComplex *x,
+               const cuDoubleComplex beta, cuDoubleComplex *y) const {
+  cusparseOperation_t cu_op = OpToCusparseOp(op);
+  if (cu_op == CUSPARSE_OPERATION_TRANSPOSE)
+    cu_op = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  else
+    cu_op = CUSPARSE_OPERATION_TRANSPOSE;
+  cusparseStatus_t err = cusparseZcsrmv(_handle, cu_op, _n, _m, _nnz, &alpha,
+      _descr, _val, _ptr, _ind, x, &beta, y);
+  CGLS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
+}
+
+// Single Complex CSR and CSC.
+template <>
+inline int Spmv<cuFloatComplex, CSR>::
+    operator()(char op, const cuFloatComplex alpha, const cuFloatComplex *x,
+               const cuFloatComplex beta, cuFloatComplex *y) const {
+  cusparseStatus_t err = cusparseCcsrmv(_handle, OpToCusparseOp(op), _m, _n,
+      _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
+  CGLS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
+}
+
+template <>
+inline int Spmv<cuFloatComplex, CSC>::
+    operator()(char op, const cuFloatComplex alpha, const cuFloatComplex *x,
+               const cuFloatComplex beta, cuFloatComplex *y) const {
+  cusparseOperation_t cu_op = OpToCusparseOp(op);
+  if (cu_op == CUSPARSE_OPERATION_TRANSPOSE)
+    cu_op = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  else
+    cu_op = CUSPARSE_OPERATION_TRANSPOSE;
+  cusparseStatus_t err = cusparseCcsrmv(_handle, cu_op, _n, _m, _nnz, &alpha,
+      _descr, _val, _ptr, _ind, x, &beta, y);
+  CGLS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
 }
 
 // Class for sparse matrix and its transpose.
@@ -270,15 +324,33 @@ class SpmvNT : Gemv<T> {
 inline cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
                            const double *x, INT incx, double *y, INT incy) {
   cublasStatus_t err = cublasDaxpy(handle, n, alpha, x, incx, y, incy);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return err;
 }
+
 inline cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
                            const float *x, INT incx, float *y, INT incy) {
   cublasStatus_t err = cublasSaxpy(handle, n, alpha, x, incx, y, incy);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return err;
 }
+
+inline cublasStatus_t axpy(cublasHandle_t handle, INT n, cuDoubleComplex *alpha,
+                           const cuDoubleComplex *x, INT incx,
+                           cuDoubleComplex *y, INT incy) {
+  cublasStatus_t err = cublasZaxpy(handle, n, alpha, x, incx, y, incy);
+  CGLS_CUDA_CHECK_ERR();
+  return err;
+}
+
+inline cublasStatus_t axpy(cublasHandle_t handle, INT n, cuFloatComplex *alpha,
+                           const cuFloatComplex *x, INT incx, cuFloatComplex *y,
+                           INT incy) {
+  cublasStatus_t err = cublasCaxpy(handle, n, alpha, x, incx, y, incy);
+  CGLS_CUDA_CHECK_ERR();
+  return err;
+}
+
 
 // 2-Norm based on thrust.
 template <typename T>
@@ -293,7 +365,7 @@ void nrm2(INT n, const T *x, T *result) {
   *result = sqrt(thrust::transform_reduce(thrust::device_pointer_cast(x),
       thrust::device_pointer_cast(x + n), Square<T>(), static_cast<T>(0),
       thrust::plus<T>()));
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
 }
 
 }  // namespace
@@ -314,18 +386,18 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   const T kZero = static_cast<T>(0);
   const T kOne = static_cast<T>(1);
   const T kNegShift = static_cast<T>(-shift);
-  const T kEps = static_cast<T>(1e-16);
+  const T kEps = std::numeric_limits<T>::epsilon();
 
   // Memory Allocation.
   cudaMalloc(&p, n * sizeof(T));
   cudaMalloc(&q, m * sizeof(T));
   cudaMalloc(&r, m * sizeof(T));
   cudaMalloc(&s, n * sizeof(T));
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
 
   cudaMemcpy(r, b, m * sizeof(T), cudaMemcpyDeviceToDevice);
   cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
 
   // r = b - A*x.
   nrm2(n, x, &normx);
@@ -333,7 +405,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   if (normx > kZero) {
     err = A('n', kNegOne, x, kOne, r);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
     if (err)
       flag = 5;
   }
@@ -341,21 +413,19 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   // s = A'*r - shift*x.
   err = A('t', kOne, r, kNegShift, s);
   cudaDeviceSynchronize();
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   if (err)
     flag = 6;
 
   // Initialize.
   cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
   nrm2(n, s, &norms);
-  cudaDeviceSynchronize();
-  CLGS_CUDA_CHECK_ERR();
   norms0 = norms;
   gamma = norms0 * norms0;
   nrm2(n, x, &normx);
-  cudaDeviceSynchronize();
   xmax = normx;
-  CLGS_CUDA_CHECK_ERR();
+  cudaDeviceSynchronize();
+  CGLS_CUDA_CHECK_ERR();
 
   if (norms < kEps)
     flag = 1;
@@ -367,7 +437,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     // q = A * p.
     err = A('n', kOne, p, kZero, q);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
     if (err) {
       flag = 5;
       break;
@@ -377,7 +447,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     nrm2(n, p, &normp);
     nrm2(m, q, &normq);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
     T delta = normq * normq + shift * normp * normp;
 
     if (delta <= 0)
@@ -392,13 +462,13 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     axpy(handle, n, &alpha, p, 1, x,  1);
     axpy(handle, m, &neg_alpha, q, 1, r,  1);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
 
     // s = A'*r - shift*x.
     cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
     err = A('t', kOne, r, kNegShift, s);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
     if (err) {
       flag = 6;
       break;
@@ -407,7 +477,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     // Compute beta.
     nrm2(n, s, &norms);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
     T gamma1 = gamma;
     gamma = norms * norms;
     T beta = gamma / gamma1;
@@ -416,12 +486,12 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     axpy(handle, n, &beta, p, 1, s, 1);
     cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
 
     // Convergence check.
     nrm2(n, x, &normx);
     cudaDeviceSynchronize();
-    CLGS_CUDA_CHECK_ERR();
+    CGLS_CUDA_CHECK_ERR();
     xmax = std::max(xmax, normx);
     bool converged = (norms <= norms0 * tol) || (normx * tol >= 1);
     if (!quiet && (converged || k % 10 == 0))
@@ -444,7 +514,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   cudaFree(q);
   cudaFree(r);
   cudaFree(s);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return flag;
 }
 
@@ -455,13 +525,13 @@ int Solve(const T *val, const INT *ptr, const INT *ind, const INT m,
           const T tol, const int maxit, bool quiet) {
   cublasHandle_t handle;
   cublasCreate(&handle);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
 
   Spmv<T, O> A(m, n, nnz, val, ptr, ind);
   int status = Solve(handle, A, m, n, b, x, shift, tol, maxit, quiet);
 
   cublasDestroy(handle);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return status;
 }
 
@@ -474,13 +544,13 @@ int Solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
 
   cublasHandle_t handle;
   cublasCreate(&handle);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
 
   SpmvNT<T, O> A(m, n, nnz, val_a, ptr_a, ind_a, val_at, ptr_at, ind_at);
   int status = Solve(handle, A, m, n, b, x, shift, tol, maxit, quiet);
 
   cublasDestroy(handle);
-  CLGS_CUDA_CHECK_ERR();
+  CGLS_CUDA_CHECK_ERR();
   return status;
 }
 
