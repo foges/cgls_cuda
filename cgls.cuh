@@ -150,6 +150,14 @@ struct Gemv {
 // File-level functions and classes.
 namespace {
 
+// Converts 'n' or 't' to a cusparseOperation_t variable.
+inline cusparseOperation_t OpToCusparseOp(char op) {
+  assert(op == 'n' || op == 'N' || op == 't' || op == 'T');
+  return (op == 'n' || op == 'N')
+      ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
+}
+
+
 // Sparse matrix-vector multiply templates.
 template <typename T, CGLS_ORD O>
 class Spmv : Gemv<T> {
@@ -160,13 +168,6 @@ class Spmv : Gemv<T> {
   INT _m, _n, _nnz;
   const T *_val;
   const INT *_ptr, *_ind;
-
-  // Converts 'n' or 't' to a cusparseOperation_t variable.
-  cusparseOperation_t OpToCusparseOp(char op) const {
-    assert(op == 'n' || op == 'N' || op == 't' || op == 'T');
-    return (op == 'n' || op == 'N')
-        ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
-  }
 
  public:
   Spmv(INT m, INT n, INT nnz, const T *val, const INT *ptr, const INT *ind)
@@ -184,8 +185,9 @@ class Spmv : Gemv<T> {
 };
 
 template <>
-int Spmv<double, CSR>::operator()(char op, const double alpha, const double *x,
-                                  const double beta, double *y) const {
+inline int Spmv<double, CSR>::operator()(char op, const double alpha,
+                                         const double *x, const double beta,
+                                         double *y) const {
   cusparseStatus_t err = cusparseDcsrmv(_handle, OpToCusparseOp(op), _m, _n,
       _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
   CLGS_CUDA_CHECK_ERR();
@@ -193,8 +195,9 @@ int Spmv<double, CSR>::operator()(char op, const double alpha, const double *x,
 }
 
 template <>
-int Spmv<double, CSC>::operator()(char op, const double alpha, const double *x,
-                                  const double beta, double *y) const {
+inline int Spmv<double, CSC>::operator()(char op, const double alpha,
+                                         const double *x, const double beta,
+                                         double *y) const {
   cusparseOperation_t cu_op = OpToCusparseOp(op);
   if (cu_op == CUSPARSE_OPERATION_TRANSPOSE)
     cu_op = CUSPARSE_OPERATION_NON_TRANSPOSE;
@@ -207,8 +210,9 @@ int Spmv<double, CSC>::operator()(char op, const double alpha, const double *x,
 }
 
 template <>
-int Spmv<float, CSR>::operator()(char op, const float alpha, const float *x,
-                                 const float beta, float *y) const {
+inline int Spmv<float, CSR>::operator()(char op, const float alpha,
+                                        const float *x, const float beta,
+                                        float *y) const {
   cusparseStatus_t err = cusparseScsrmv(_handle, OpToCusparseOp(op), _m, _n,
       _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
   CLGS_CUDA_CHECK_ERR();
@@ -216,8 +220,9 @@ int Spmv<float, CSR>::operator()(char op, const float alpha, const float *x,
 }
 
 template <>
-int Spmv<float, CSC>::operator()(char op, const float alpha, const float *x,
-                                 const float beta, float *y) const {
+inline int Spmv<float, CSC>::operator()(char op, const float alpha,
+                                        const float *x, const float beta,
+                                        float *y) const {
   cusparseOperation_t cu_op = OpToCusparseOp(op);
   if (cu_op == CUSPARSE_OPERATION_TRANSPOSE)
     cu_op = CUSPARSE_OPERATION_NON_TRANSPOSE;
@@ -261,27 +266,19 @@ class SpmvNT : Gemv<T> {
   }
 };
 
-// Generic Axpy function.
-// Making Axpy a template avoids separate cu and cuh files.
-template <typename T>
-struct Axpy {
-  static cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
-                             const double *x, INT incx, double *y, INT incy) {
-    cublasStatus_t err = cublasDaxpy(handle, n, alpha, x, incx, y, incy);
-    CLGS_CUDA_CHECK_ERR();
-    return err;
-  }
-  static cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
-                             const float *x, INT incx, float *y, INT incy) {
-    cublasStatus_t err = cublasSaxpy(handle, n, alpha, x, incx, y, incy);
-    CLGS_CUDA_CHECK_ERR();
-    return err;
-  }
-  cublasStatus_t operator()(cublasHandle_t handle, INT n, T *alpha, const T *x,
-                            INT incx, T *y, INT incy) const {
-    return axpy(handle, n, alpha, x, incx, y, incy);
-  }
-};
+// Axpy function.
+inline cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
+                           const double *x, INT incx, double *y, INT incy) {
+  cublasStatus_t err = cublasDaxpy(handle, n, alpha, x, incx, y, incy);
+  CLGS_CUDA_CHECK_ERR();
+  return err;
+}
+inline cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
+                           const float *x, INT incx, float *y, INT incy) {
+  cublasStatus_t err = cublasSaxpy(handle, n, alpha, x, incx, y, incy);
+  CLGS_CUDA_CHECK_ERR();
+  return err;
+}
 
 // 2-Norm based on thrust.
 template <typename T>
@@ -318,9 +315,6 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   const T kOne = static_cast<T>(1);
   const T kNegShift = static_cast<T>(-shift);
   const T kEps = static_cast<T>(1e-16);
-
-  // Create an Axpy instance.
-  Axpy<T> axpy = Axpy<T>();
 
   // Memory Allocation.
   cudaMalloc(&p, n * sizeof(T));
