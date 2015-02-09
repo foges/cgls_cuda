@@ -29,7 +29,7 @@
 //  Template Arguments:
 //  T          - Data type (float or double).
 //
-//  F          - Generic GEMV-like functor type with signature 
+//  F          - Generic GEMV-like functor type with signature
 //               int gemv(char op, T alpha, const T *x, T beta, T *y). Upon exit,
 //               y should take on the value y := alpha*op(A)x + beta*y. If
 //               successful the functor must return 0, otherwise a non-zero
@@ -126,7 +126,7 @@
       exit(EXIT_FAILURE); \
     } \
   } while (0)
-#else 
+#else
 #define CLGS_CUDA_CHECK_ERR()
 #endif
 
@@ -150,22 +150,24 @@ struct Gemv {
 // File-level functions and classes.
 namespace {
 
-// Converts 'n' or 't' to a cusparseOperation_t variable.
-cusparseOperation_t OpToCusparseOp(char op) {
-  assert(op == 'n' || op == 'N' || op == 't' || op == 'T');
-  return (op == 'n' || op == 'N')
-      ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
-}
-
 // Sparse matrix-vector multiply templates.
 template <typename T, CGLS_ORD O>
 class Spmv : Gemv<T> {
  private:
   cusparseHandle_t _handle;
   cusparseMatDescr_t _descr;
+
   INT _m, _n, _nnz;
   const T *_val;
   const INT *_ptr, *_ind;
+
+  // Converts 'n' or 't' to a cusparseOperation_t variable.
+  cusparseOperation_t OpToCusparseOp(char op) const {
+    assert(op == 'n' || op == 'N' || op == 't' || op == 'T');
+    return (op == 'n' || op == 'N')
+        ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
+  }
+
  public:
   Spmv(INT m, INT n, INT nnz, const T *val, const INT *ptr, const INT *ind)
       : _m(m), _n(n), _nnz(nnz), _val(val), _ptr(ptr), _ind(ind) {
@@ -233,6 +235,7 @@ class SpmvNT : Gemv<T> {
  private:
   Spmv<T, O> A;
   Spmv<T, O> At;
+
  public:
   SpmvNT(INT m, INT n, INT nnz, const T *val_a, const INT *ptr_a,
          const INT *ind_a, const T *val_at, const INT *ptr_at,
@@ -258,20 +261,27 @@ class SpmvNT : Gemv<T> {
   }
 };
 
-// AXPY function.
-cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
-                    const double *x, INT incx, double *y, INT incy) {
-  cublasStatus_t err = cublasDaxpy(handle, n, alpha, x, incx, y, incy);
-  CLGS_CUDA_CHECK_ERR();
-  return err;
-}
-
-cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
-                    const float *x, INT incx, float *y, INT incy) {
-  cublasStatus_t err = cublasSaxpy(handle, n, alpha, x, incx, y, incy);
-  CLGS_CUDA_CHECK_ERR();
-  return err;
-}
+// Generic Axpy function.
+// Making Axpy a template avoids separate cu and cuh files.
+template <typename T>
+struct Axpy {
+  static cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
+                             const double *x, INT incx, double *y, INT incy) {
+    cublasStatus_t err = cublasDaxpy(handle, n, alpha, x, incx, y, incy);
+    CLGS_CUDA_CHECK_ERR();
+    return err;
+  }
+  static cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
+                             const float *x, INT incx, float *y, INT incy) {
+    cublasStatus_t err = cublasSaxpy(handle, n, alpha, x, incx, y, incy);
+    CLGS_CUDA_CHECK_ERR();
+    return err;
+  }
+  cublasStatus_t operator()(cublasHandle_t handle, INT n, T *alpha, const T *x,
+                            INT incx, T *y, INT incy) const {
+    return axpy(handle, n, alpha, x, incx, y, incy);
+  }
+};
 
 // 2-Norm based on thrust.
 template <typename T>
@@ -308,6 +318,9 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   const T kOne = static_cast<T>(1);
   const T kNegShift = static_cast<T>(-shift);
   const T kEps = static_cast<T>(1e-16);
+
+  // Create an Axpy instance.
+  Axpy<T> axpy = Axpy<T>();
 
   // Memory Allocation.
   cudaMalloc(&p, n * sizeof(T));
