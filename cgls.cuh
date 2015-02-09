@@ -351,8 +351,7 @@ inline cublasStatus_t axpy(cublasHandle_t handle, INT n, cuFloatComplex *alpha,
   return err;
 }
 
-
-// 2-Norm based on thrust.
+// 2-Norm based on thrust, potentially not as stable as cuBLAS version.
 template <typename T>
 struct NormSquared : thrust::unary_function<T, double> {
   inline __device__ double operator()(const T &x);
@@ -390,7 +389,7 @@ void nrm2(INT n, const T *x, double *result) {
   CGLS_CUDA_CHECK_ERR();
 }
 
-// Casting operators
+// Casting from double to float, double, complex_float, and complex_double.
 template <typename T>
 T CastFromDouble(double x);
 
@@ -399,7 +398,6 @@ inline double CastFromDouble<double>(double x) {
  return x;
 }
 
-// Casting from double to (float, double, complex_float, complex_double).
 template <>
 inline float CastFromDouble<float>(double x) {
  return static_cast<float>(x);
@@ -415,7 +413,7 @@ inline cuFloatComplex CastFromDouble<cuFloatComplex>(double x) {
  return make_cuFloatComplex(x, 0.f);
 }
 
-// Epsilon for (float, double, complex_float, complex_double).
+// Numeric limit epsilon for float, double, complex_float, and complex_double.
 template <typename T>
 double Epsilon();
 
