@@ -122,7 +122,7 @@
   do { \
     cudaError_t err = cudaGetLastError(); \
     if (err != cudaSuccess) { \
-      printf("%s:%d:%s\nERROR_CUDA: %s\n", __FILE__, __LINE__, __func__, \
+      printf("%s:%d:%s\n ERROR_CUDA: %s\n", __FILE__, __LINE__, __func__, \
              cudaGetErrorString(err)); \
       exit(EXIT_FAILURE); \
     } \
@@ -354,18 +354,89 @@ inline cublasStatus_t axpy(cublasHandle_t handle, INT n, cuFloatComplex *alpha,
 
 // 2-Norm based on thrust.
 template <typename T>
-struct Square : thrust::unary_function<T, T> {
-  __device__ T operator()(const T &x) {
-    return abs(x) * abs(x);
-  }
+struct NormSquared : thrust::unary_function<T, double> {
+  inline __device__ double operator()(const T &x);
 };
 
+template <>
+inline __device__ double NormSquared<double>::operator()(const double &x) {
+  return x * x;
+}
+
+template <>
+inline __device__ double NormSquared<float>::operator()(const float &x) {
+  return static_cast<double>(x) * static_cast<double>(x);
+}
+
+template <>
+inline __device__ double NormSquared<cuDoubleComplex>::
+    operator()(const cuDoubleComplex &x) {
+  return static_cast<double>(x.x) * static_cast<double>(x.x) +
+      static_cast<double>(x.y) * static_cast<double>(x.y);
+}
+
+template <>
+inline __device__ double NormSquared<cuFloatComplex>::
+    operator()(const cuFloatComplex &x) {
+  return static_cast<double>(x.x) * static_cast<double>(x.x) +
+      static_cast<double>(x.y) * static_cast<double>(x.y);
+}
+
 template <typename T>
-void nrm2(INT n, const T *x, T *result) {
+void nrm2(INT n, const T *x, double *result) {
   *result = sqrt(thrust::transform_reduce(thrust::device_pointer_cast(x),
-      thrust::device_pointer_cast(x + n), Square<T>(), static_cast<T>(0),
-      thrust::plus<T>()));
+      thrust::device_pointer_cast(x + n), NormSquared<T>(), 0.,
+      thrust::plus<double>()));
   CGLS_CUDA_CHECK_ERR();
+}
+
+// Casting operators
+template <typename T>
+T CastFromDouble(double x);
+
+template <>
+inline double CastFromDouble<double>(double x) {
+ return x;
+}
+
+// Casting from double to (float, double, complex_float, complex_double).
+template <>
+inline float CastFromDouble<float>(double x) {
+ return static_cast<float>(x);
+}
+
+template <>
+inline cuDoubleComplex CastFromDouble<cuDoubleComplex>(double x) {
+ return make_cuDoubleComplex(x, 0.);
+}
+
+template <>
+inline cuFloatComplex CastFromDouble<cuFloatComplex>(double x) {
+ return make_cuFloatComplex(x, 0.f);
+}
+
+// Epsilon for (float, double, complex_float, complex_double).
+template <typename T>
+double Epsilon();
+
+template<>
+inline double Epsilon<double>() {
+  return std::numeric_limits<double>::epsilon();
+}
+
+template<>
+inline double Epsilon<cuDoubleComplex>() {
+  return std::numeric_limits<double>::epsilon();
+}
+
+template<>
+inline double Epsilon<float>() {
+  return std::numeric_limits<float>::epsilon();
+}
+
+template<>
+inline double Epsilon<cuFloatComplex>() {
+  return std::numeric_limits<float>::epsilon();
 }
 
 }  // namespace
@@ -373,20 +444,20 @@ void nrm2(INT n, const T *x, T *result) {
 // Conjugate Gradient Least Squares.
 template <typename T, typename F>
 int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
-          const T *b, T *x, const T shift, const T tol, const int maxit,
-          bool quiet) {
+          const T *b, T *x, const double shift, const double tol,
+          const int maxit, bool quiet) {
   // Variable declarations.
   T *p, *q, *r, *s;
-  T gamma, normp, normq, norms, norms0, normx, xmax;
+  double gamma, normp, normq, norms, norms0, normx, xmax;
   char fmt[] = "%5d %9.2e %12.5g\n";
   int err = 0, k = 0, flag = 0, indefinite = 0;
 
   // Constant declarations.
-  const T kNegOne = static_cast<T>(-1);
-  const T kZero = static_cast<T>(0);
-  const T kOne = static_cast<T>(1);
-  const T kNegShift = static_cast<T>(-shift);
-  const T kEps = std::numeric_limits<T>::epsilon();
+  const T kNegOne   = CastFromDouble<T>(-1.);
+  const T kZero     = CastFromDouble<T>( 0.);
+  const T kOne      = CastFromDouble<T>( 1.);
+  const T kNegShift = CastFromDouble<T>(-shift);
+  const double kEps = Epsilon<T>();
 
   // Memory Allocation.
   cudaMalloc(&p, n * sizeof(T));
@@ -402,7 +473,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   // r = b - A*x.
   nrm2(n, x, &normx);
   cudaDeviceSynchronize();
-  if (normx > kZero) {
+  if (normx > 0.) {
     err = A('n', kNegOne, x, kOne, r);
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
@@ -448,14 +519,14 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     nrm2(m, q, &normq);
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
-    T delta = normq * normq + shift * normp * normp;
+    double delta = normq * normq + shift * normp * normp;
 
-    if (delta <= 0)
+    if (delta <= 0.)
       indefinite = 1;
-    if (delta == 0)
+    if (delta == 0.)
       delta = kEps;
-    T alpha = gamma / delta;
-    T neg_alpha = -alpha;
+    T alpha = CastFromDouble<T>(gamma / delta);
+    T neg_alpha = CastFromDouble<T>(-gamma / delta);
 
     // x = x + alpha*p.
     // r = r - alpha*q.
@@ -478,9 +549,9 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     nrm2(n, s, &norms);
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
-    T gamma1 = gamma;
+    double gamma1 = gamma;
     gamma = norms * norms;
-    T beta = gamma / gamma1;
+    T beta = CastFromDouble<T>(gamma / gamma1);
 
     // p = s + beta*p.
     axpy(handle, n, &beta, p, 1, s, 1);
@@ -493,7 +564,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
     xmax = std::max(xmax, normx);
-    bool converged = (norms <= norms0 * tol) || (normx * tol >= 1);
+    bool converged = (norms <= norms0 * tol) || (normx * tol >= 1.);
     if (!quiet && (converged || k % 10 == 0))
       printf(fmt, k, normx, norms / norms0);
     if (converged)
@@ -501,7 +572,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   }
 
   // Determine exit status.
-  T shrink = normx / xmax;
+  double shrink = normx / xmax;
   if (k == maxit)
     flag = 2;
   else if (indefinite)
@@ -521,8 +592,8 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
 // Sparse CGLS.
 template <typename T, CGLS_ORD O>
 int Solve(const T *val, const INT *ptr, const INT *ind, const INT m,
-          const INT n, const INT nnz, const T *b, T *x, const T shift,
-          const T tol, const int maxit, bool quiet) {
+          const INT n, const INT nnz, const T *b, T *x, const double shift,
+          const double tol, const int maxit, bool quiet) {
   cublasHandle_t handle;
   cublasCreate(&handle);
   CGLS_CUDA_CHECK_ERR();
@@ -539,7 +610,7 @@ int Solve(const T *val, const INT *ptr, const INT *ind, const INT m,
 template <typename T, CGLS_ORD O>
 int Solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
           const INT *ptr_at, const INT *ind_at, const INT m, const INT n,
-          const INT nnz, const T *b, T *x, const T shift, const T tol,
+          const INT nnz, const T *b, T *x, const double shift, const double tol,
           const int maxit, bool quiet) {
 
   cublasHandle_t handle;

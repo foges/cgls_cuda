@@ -5,7 +5,9 @@
 
 // Define real type.
 typedef double real_t;
+typedef cuDoubleComplex complex_t;
 #define csr2csc cusparseDcsr2csc
+#define makeComplex make_cuDoubleComplex
 
 // Generates random CSR matrix with entries in [-1, 1]. The matrix will have
 // exactly nnz non-zeros. All arrays must be pre-allocated.
@@ -152,8 +154,82 @@ void test2() {
   cudaFree(cind_d);
 }
 
-// Test CGLS on larger random matrix.
+// Test complex value entries.
 void test3() {
+  // Initialize variables.
+  double shift = 1.;
+  double tol   = 1e-6;
+  int maxit = 20;
+  bool quiet = false;
+  int m = 5;
+  int n = 5;
+  int nnz = 13;
+
+  // Initialize data.
+  complex_t val_h[]  = {makeComplex( 1, 0), makeComplex(-1, 0),
+                        makeComplex(-3, 0), makeComplex(-2, 0),
+                        makeComplex( 5, 0), makeComplex( 4, 0),
+                        makeComplex( 6, 0), makeComplex( 4, 0),
+                        makeComplex(-4, 0), makeComplex( 2, 0),
+                        makeComplex( 7, 0), makeComplex( 8, 0),
+                        makeComplex(-5, 0)};
+  int cind_h[]       = {0, 1, 3, 0, 1, 2, 3, 4, 0, 2, 3, 1, 4};
+  int rptr_h[]       = {0, 3, 5, 8, 11, 13};
+  complex_t b_h[]    = {makeComplex(-2, 0), makeComplex(-1, 0),
+                        makeComplex( 0, 0), makeComplex( 1, 0),
+                        makeComplex( 2, 0)};
+  complex_t x_h[]    = {makeComplex(0, 0), makeComplex(0, 0),
+                        makeComplex(0, 0), makeComplex(0, 0),
+                        makeComplex(0, 0), makeComplex(0, 0)};
+  complex_t x_star[] = {makeComplex( 0.461620337853983, 0),
+                        makeComplex( 0.025458521291462, 0),
+                        makeComplex(-0.509793131412600, 0),
+                        makeComplex( 0.579159637092979, 0),
+                        makeComplex(-0.350590484189795, 0)};
+
+  // Transfer variables to device.
+  complex_t *val_d, *b_d, *x_d;
+  int *cind_d, *rptr_d;
+
+  cudaMalloc(&val_d, (nnz + m + n) * sizeof(complex_t));
+  cudaMalloc(&cind_d, (nnz + m + 1) * sizeof(int));
+  b_d = val_d + nnz;
+  x_d = b_d + m;
+  rptr_d = cind_d + nnz;
+
+  cudaMemcpy(val_d, val_h, nnz * sizeof(complex_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_d, b_h, m * sizeof(complex_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(x_d, x_h, n * sizeof(complex_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(cind_d, cind_h, nnz * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemcpy(rptr_d, rptr_h, (m + 1) * sizeof(int), cudaMemcpyHostToDevice);
+
+  // Solve.
+  int flag = cgls::Solve<complex_t, cgls::CSR>(val_d, rptr_d, cind_d, m, n,
+      nnz, b_d, x_d, shift, tol, maxit, quiet);
+
+  // Retrieve solution.
+  cudaMemcpy(x_h, x_d, n * sizeof(complex_t), cudaMemcpyDeviceToHost);
+
+  // Compute error and print.
+  double err = 0;
+  for (int i = 0; i < n; ++i) {
+    err += (x_h[i].x - x_star[i].x) * (x_h[i].x - x_star[i].x) +
+        (x_h[i].y - x_star[i].y) * (x_h[i].y - x_star[i].y);
+  }
+  err = std::sqrt(err);
+  if (flag == 0 && err < tol)
+    printf("Test3 Passed: Flag = %d, Error = %e\n", flag, err);
+  else
+    printf("Test3 Failed: Flag = %d, Error = %e\n", flag, err);
+
+  // Free data.
+  cudaFree(val_d);
+  cudaFree(cind_d);
+}
+
+
+// Test CGLS on larger random matrix.
+void test4() {
   // Reset random seed.
   srand(0);
 
@@ -256,10 +332,10 @@ void test3() {
 
   if (flag1 == 0 && flag2 == 0 && flag3 == 0 && flag4 == 0
       && err1 < tol && err2 < tol && err3 < tol) {
-    printf("Test3 Passed: Flag = (%d, %d, %d, %d), Error = (%e, %e, %e)\n",
+    printf("Test4 Passed: Flag = (%d, %d, %d, %d), Error = (%e, %e, %e)\n",
         flag1, flag2, flag3, flag4, err1, err2, err3);
   } else {
-    printf("Test3 Failed: Flag = (%d, %d, %d, %d), Error = (%e, %e, %e)\n",
+    printf("Test4 Failed: Flag = (%d, %d, %d, %d), Error = (%e, %e, %e)\n",
         flag1, flag2, flag3, flag4, err1, err2, err3);
   }
 
@@ -291,5 +367,6 @@ int main() {
   test1();
   test2();
   test3();
+  test4();
 }
 
