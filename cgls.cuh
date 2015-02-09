@@ -21,26 +21,52 @@
 //    min. ||Ax - b||_2^2 + s ||x||_2^2
 //
 //  using the Conjugate Gradient for Least Squares method. This is more stable
-//  than applying CG to the normal equations.
+//  than applying CG to the normal equations. Supports both generic operators
+//  for computing Ax and A^Tx as well as a sparse matrix version.
+//
+//  ------------------------------ GENERIC  ------------------------------------
 //
 //  Template Arguments:
 //  T          - Data type (float or double).
 //
-//  F          - Sparse ordering (cgls::CSC or cgls::CSR).
+//  F          - Generic GEMV-like functor type with signature 
+//               int gemv(char op, T alpha, const T *x, T beta, T *y). Upon exit,
+//               y should take on the value y := alpha*op(A)x + beta*y. If
+//               successful the functor must return 0, otherwise a non-zero
+//               value should be returned.
 //
 //  Function Arguments:
-//  handle_s   - Cusparse handle.
+//  A          - Operator that computes Ax and A^Tx.
 //
-//  handle_b   - Cublas handle.
+//  (m, n)     - Matrix dimensions of A.
 //
-//  descr      - Cusparse matrix descriptor (i.e. 0- or 1-based indexing)
+//  b          - Pointer to right-hand-side vector.
 //
+//  x          - Pointer to solution. This vector will also be used as an
+//               initial guess, so it must be initialized (eg. to 0).
+//
+//  shift      - Regularization parameter s. Solves (A'*A + shift*I)*x = A'*b.
+//
+//  tol        - Specifies tolerance (recommended 1e-6).
+//
+//  maxit      - Maximum number of iterations (recommended > 100).
+//
+//  quiet      - Disable printing to console.
+//
+//  ------------------------------ SPARSE --------------------------------------
+//
+//  Template Arguments:
+//  T          - Data type (float or double).
+//
+//  O          - Sparse ordering (cgls::CSC or cgls::CSR).
+//
+//  Function Arguments:
 //  val        - Array of matrix values. The array should be of length nnz.
 //
-//  ptr        - Column pointer if (F is CSC) or row pointer if (F is CSR).
+//  ptr        - Column pointer if (O is CSC) or row pointer if (O is CSR).
 //               The array should be of length m+1.
 //
-//  ind        - Row indices if (F is CSC) or column indices if (F is CSR).
+//  ind        - Row indices if (O is CSC) or column indices if (O is CSR).
 //               The array should be of length nnz.
 //
 //  (m, n)     - Matrix dimensions of A.
@@ -60,12 +86,16 @@
 //
 //  quiet      - Disable printing to console.
 //
+//  ----------------------------------------------------------------------------
+//
 //  Returns:
 //  0 : CGLS converged to the desired tolerance tol within maxit iterations.
 //  1 : The vector b had norm less than eps, solution likely x = 0.
 //  2 : CGLS iterated maxit times but did not converge.
 //  3 : Matrix (A'*A + shift*I) seems to be singular or indefinite.
 //  4 : Likely instable, (A'*A + shift*I) indefinite and norm(x) decreased.
+//  5 : Error in applying operator A.
+//  6 : Error in applying operator A^T.
 //
 //  Reference:
 //  http://web.stanford.edu/group/SOL/software/cgls/
@@ -74,6 +104,7 @@
 #ifndef CGLS_CUH_
 #define CGLS_CUH_
 
+#include <assert.h>
 #include <stdio.h>
 
 #include <cublas_v2.h>
@@ -84,6 +115,21 @@
 
 #include <algorithm>
 
+// Macro to check for CUDA errors.
+#ifndef CGLS_DISABLE_ERROR_CHECK
+#define CLGS_CUDA_CHECK_ERR() \
+  do { \
+    cudaError_t err = cudaGetLastError(); \
+    if (err != cudaSuccess) { \
+      std::cout << __FILE__ << ":" << __LINE__ << ":" <<  __func__ << "\n" \
+                << "ERROR_CUDA: " << cudaGetErrorString(err) <<  std::endl; \
+      exit(EXIT_FAILURE); \
+    } \
+  } while (0)
+#else 
+#define CLGS_CUDA_CHECK_ERR()
+#endif
+
 namespace cgls {
 
 // Data type for sparse format.
@@ -93,81 +139,131 @@ enum CGLS_ORD { CSC, CSR };
 // changes their API (a la MKL).
 typedef int INT;
 
-// Templated BLAS operations. Skip this part if you're looking for CGLS.
 namespace {
 
+// Converts 'n' or 't' to a cusparseOperation_t variable.
+cusparseOperation_t OpToCusparseOp(char op) {
+  assert(op == 'n' || op == 'N' || op == 't' || op == 'T');
+  return (op == 'n' || op == 'N')
+      ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
+}
+
 // Sparse matrix-vector multiply templates.
-template <typename T, CGLS_ORD F>
-cusparseStatus_t spmv(cusparseHandle_t handle, cusparseOperation_t transA,
-                      INT m, INT n, INT nnz, const T *alpha,
-                      cusparseMatDescr_t descrA, const T *val, const INT *ptr,
-                      const INT *ind, const T *x, const T *beta, T *y);
+template <typename T, CGLS_ORD O>
+class Spmv {
+ private:
+  cusparseHandle_t _handle;
+  cusparseMatDescr_t _descr;
+  INT _m, _n, _nnz;
+  const T *_val;
+  const INT *_ptr, *_ind;
+ public:
+  Spmv(INT m, INT n, INT nnz, const T *val, const INT *ptr, const INT *ind)
+      : _m(m), _n(n), _nnz(nnz), _val(val), _ptr(ptr), _ind(ind) {
+    cusparseCreate(&_handle);
+    cusparseCreateMatDescr(&_descr);
+    CLGS_CUDA_CHECK_ERR();
+  }
+  ~Spmv() {
+    cusparseDestroy(_handle);
+    cusparseDestroyMatDescr(_descr);
+    CLGS_CUDA_CHECK_ERR();
+  }
+  int operator()(char op, const T alpha, const T *x, const T beta, T *y) const;
+};
 
 template <>
-cusparseStatus_t spmv<double, CSR>(cusparseHandle_t handle,
-                                   cusparseOperation_t transA, INT m, INT n,
-                                   INT nnz, const double *alpha,
-                                   cusparseMatDescr_t descrA, const double *val,
-                                   const INT *ptr, const INT *ind,
-                                   const double *x, const double *beta,
-                                   double *y) {
-  return cusparseDcsrmv(handle, transA, m, n, nnz, alpha, descrA, val, ptr,
-      ind, x, beta, y);
+int Spmv<double, CSR>::operator()(char op, const double alpha, const double *x,
+                                  const double beta, double *y) const {
+  cusparseStatus_t err = cusparseDcsrmv(_handle, OpToCusparseOp(op), _m, _n,
+      _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
+  CLGS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
 }
 
 template <>
-cusparseStatus_t spmv<double, CSC>(cusparseHandle_t handle,
-                                   cusparseOperation_t transA, INT m, INT n,
-                                   INT nnz, const double *alpha,
-                                   cusparseMatDescr_t descrA, const double *val,
-                                   const INT *ptr, const INT *ind,
-                                   const double *x, const double *beta,
-                                   double *y) {
-  if (transA == CUSPARSE_OPERATION_TRANSPOSE)
-    transA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+int Spmv<double, CSC>::operator()(char op, const double alpha, const double *x,
+                                  const double beta, double *y) const {
+  cusparseOperation_t cu_op = OpToCusparseOp(op);
+  if (cu_op == CUSPARSE_OPERATION_TRANSPOSE)
+    cu_op = CUSPARSE_OPERATION_NON_TRANSPOSE;
   else
-    transA = CUSPARSE_OPERATION_TRANSPOSE;
-  return cusparseDcsrmv(handle, transA, n, m, nnz, alpha, descrA, val, ptr,
-      ind, x, beta, y);
+    cu_op = CUSPARSE_OPERATION_TRANSPOSE;
+  cusparseStatus_t err = cusparseDcsrmv(_handle, cu_op, _n, _m, _nnz, &alpha,
+      _descr, _val, _ptr, _ind, x, &beta, y);
+  CLGS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
 }
 
 template <>
-cusparseStatus_t spmv<float, CSR>(cusparseHandle_t handle,
-                                  cusparseOperation_t transA, INT m, INT n,
-                                  INT nnz, const float *alpha,
-                                  cusparseMatDescr_t descrA, const float *val,
-                                  const INT *ptr, const INT *ind,
-                                  const float *x, const float *beta,
-                                  float *y) {
-  return cusparseScsrmv(handle, transA, m, n, nnz, alpha, descrA, val, ptr,
-      ind, x, beta, y);
+int Spmv<float, CSR>::operator()(char op, const float alpha, const float *x,
+                                 const float beta, float *y) const {
+  cusparseStatus_t err = cusparseScsrmv(_handle, OpToCusparseOp(op), _m, _n,
+      _nnz, &alpha, _descr, _val, _ptr, _ind, x, &beta, y);
+  CLGS_CUDA_CHECK_ERR();
+  return err != CUSPARSE_STATUS_SUCCESS;
 }
 
 template <>
-cusparseStatus_t spmv<float, CSC>(cusparseHandle_t handle,
-                                  cusparseOperation_t transA, INT m, INT n,
-                                  INT nnz, const float *alpha,
-                                  cusparseMatDescr_t descrA, const float *val,
-                                  const INT *ptr, const INT *ind,
-                                  const float *x, const float *beta,
-                                  float *y) {
-  if (transA == CUSPARSE_OPERATION_TRANSPOSE)
-    transA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+int Spmv<float, CSC>::operator()(char op, const float alpha, const float *x,
+                                 const float beta, float *y) const {
+  cusparseOperation_t cu_op = OpToCusparseOp(op);
+  if (cu_op == CUSPARSE_OPERATION_TRANSPOSE)
+    cu_op = CUSPARSE_OPERATION_NON_TRANSPOSE;
   else
-    transA = CUSPARSE_OPERATION_TRANSPOSE;
-  return cusparseScsrmv(handle, transA, n, m, nnz, alpha, descrA, val, ptr,
-      ind, x, beta, y);
+    cu_op = CUSPARSE_OPERATION_TRANSPOSE;
+  cusparseStatus_t err = cusparseScsrmv(_handle, cu_op, _n, _m, _nnz, &alpha,
+      _descr, _val, _ptr, _ind, x, &beta, y);
+  CLGS_CUDA_CHECK_ERR();
+  return err;
 }
+
+// Class for sparse matrix and its transpose.
+template <typename T, CGLS_ORD O>
+class SpmvNT {
+ private:
+  Spmv<T, O> A;
+  Spmv<T, O> At;
+ public:
+  SpmvNT(INT m, INT n, INT nnz, const T *val_a, const INT *ptr_a,
+         const INT *ind_a, const T *val_at, const INT *ptr_at,
+         const INT *ind_at)
+      : A(m, n, nnz, val_a, ptr_a, ind_a),
+        At(n, m, nnz, val_at, ptr_at, ind_at) { }
+  int operator()(char op, const T alpha, const T *x, const T beta, T *y) const {
+    switch (O) {
+      case CSR: {
+        if (op == 'n' || op == 'N')
+          return A('n', alpha, x, beta, y);
+        else
+          return At('n', alpha, x, beta, y);
+      }
+      case CSC: {
+        if (op == 'n' || op == 'N')
+          return At('t', alpha, x, beta, y);
+        else
+          return A('t', alpha, x, beta, y);
+      }
+      default:
+        assert(false);
+        return 1;
+    }
+  }
+};
 
 // AXPY function.
 cublasStatus_t axpy(cublasHandle_t handle, INT n, double *alpha,
                     const double *x, INT incx, double *y, INT incy) {
-  return cublasDaxpy(handle, n, alpha, x, incx, y, incy);
+  cublasStatus_t err = cublasDaxpy(handle, n, alpha, x, incx, y, incy);
+  CLGS_CUDA_CHECK_ERR();
+  return err;
 }
 
 cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
                     const float *x, INT incx, float *y, INT incy) {
-  return cublasSaxpy(handle, n, alpha, x, incx, y, incy);
+  cublasStatus_t err = cublasSaxpy(handle, n, alpha, x, incx, y, incy);
+  CLGS_CUDA_CHECK_ERR();
+  return err;
 }
 
 // 2-Norm based on thrust.
@@ -183,24 +279,21 @@ void nrm2(INT n, const T *x, T *result) {
   *result = sqrt(thrust::transform_reduce(thrust::device_pointer_cast(x),
       thrust::device_pointer_cast(x + n), Square<T>(), static_cast<T>(0),
       thrust::plus<T>()));
+  CLGS_CUDA_CHECK_ERR();
 }
 
 }  // namespace
 
-// TODO(chris): Check cuda errors.
-// Conjugate Gradient Least Squares. This version depends only on the matrix
-// A and may in practice be much slower than the version using A and A^T
-// separately. This is because of constant memory allocation and freeing.
-template <typename T, CGLS_ORD F>
-INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
-          cusparseMatDescr_t descr, const T *val, const INT *ptr,
-          const INT *ind, const INT m, const INT n, const INT nnz, const T *b,
-          T *x, const T shift, const T tol, const INT maxit, bool quiet) {
+// Conjugate Gradient Least Squares.
+template <typename T, typename F>
+int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
+          const INT nnz, const T *b, T *x, const T shift, const T tol,
+          const int maxit, bool quiet) {
   // Variable declarations.
   T *p, *q, *r, *s;
   T gamma, normp, normq, norms, norms0, normx, xmax;
   char fmt[] = "%5d %9.2e %12.5g\n";
-  INT k, flag = 0, indefinite = 0;
+  int err = 0, k = 0, flag = 0, indefinite = 0;
 
   // Constant declarations.
   const T kNegOne = static_cast<T>(-1);
@@ -214,27 +307,41 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
   cudaMalloc(&q, m * sizeof(T));
   cudaMalloc(&r, m * sizeof(T));
   cudaMalloc(&s, n * sizeof(T));
+  CLGS_CUDA_CHECK_ERR();
 
   cudaMemcpy(r, b, m * sizeof(T), cudaMemcpyDeviceToDevice);
   cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
+  CLGS_CUDA_CHECK_ERR();
 
   // r = b - A*x.
-  spmv<T, F>(handle_s, CUSPARSE_OPERATION_NON_TRANSPOSE, m, n, nnz, &kNegOne,
-      descr, val, ptr, ind, x, &kOne, r);
+  nrm2(n, x, &normx);
+  cudaDeviceSynchronize();
+  if (normx > kZero) {
+    err = A('n', kNegOne, x, kOne, r);
+    cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
+    if (err)
+      flag = 5;
+  }
 
   // s = A'*r - shift*x.
-  spmv<T, F>(handle_s, CUSPARSE_OPERATION_TRANSPOSE, m, n, nnz, &kOne,
-      descr, val, ptr, ind, r, &kNegShift, s);
+  err = A('t', kOne, r, kNegShift, s);
+  cudaDeviceSynchronize();
+  CLGS_CUDA_CHECK_ERR();
+  if (err)
+    flag = 6;
 
   // Initialize.
   cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
   nrm2(n, s, &norms);
   cudaDeviceSynchronize();
+  CLGS_CUDA_CHECK_ERR();
   norms0 = norms;
   gamma = norms0 * norms0;
   nrm2(n, x, &normx);
   cudaDeviceSynchronize();
   xmax = normx;
+  CLGS_CUDA_CHECK_ERR();
 
   if (norms < kEps)
     flag = 1;
@@ -244,13 +351,19 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 
   for (k = 0; k < maxit && !flag; ++k) {
     // q = A * p.
-    spmv<T, F>(handle_s, CUSPARSE_OPERATION_NON_TRANSPOSE, m, n, nnz, &kOne,
-        descr, val, ptr, ind, p, &kZero, q);
+    err = A('n', kOne, p, kZero, q);
+    cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
+    if (err) {
+      flag = 5;
+      break;
+    }
 
     // delta = norm(p)^2 + shift*norm(q)^2.
     nrm2(n, p, &normp);
     nrm2(m, q, &normq);
     cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
     T delta = normq * normq + shift * normp * normp;
 
     if (delta <= 0)
@@ -262,28 +375,39 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
 
     // x = x + alpha*p.
     // r = r - alpha*q.
-    axpy(handle_b, n, &alpha, p, 1, x,  1);
-    axpy(handle_b, m, &neg_alpha, q, 1, r,  1);
+    axpy(handle, n, &alpha, p, 1, x,  1);
+    axpy(handle, m, &neg_alpha, q, 1, r,  1);
+    cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
 
     // s = A'*r - shift*x.
     cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
-    spmv<T, F>(handle_s, CUSPARSE_OPERATION_TRANSPOSE, m, n, nnz, &kOne,
-        descr, val, ptr, ind, r, &kNegShift, s);
+    err = A('t', kOne, r, kNegShift, s);
+    cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
+    if (err) {
+      flag = 6;
+      break;
+    }
 
     // Compute beta.
     nrm2(n, s, &norms);
     cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
     T gamma1 = gamma;
     gamma = norms * norms;
     T beta = gamma / gamma1;
 
     // p = s + beta*p.
-    axpy(handle_b, n, &beta, p, 1, s, 1);
+    axpy(handle, n, &beta, p, 1, s, 1);
     cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
+    cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
 
     // Convergence check.
     nrm2(n, x, &normx);
     cudaDeviceSynchronize();
+    CLGS_CUDA_CHECK_ERR();
     xmax = std::max(xmax, normx);
     bool converged = (norms <= norms0 * tol) || (normx * tol >= 1);
     if (!quiet && (converged || k % 10 == 0))
@@ -306,203 +430,44 @@ INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
   cudaFree(q);
   cudaFree(r);
   cudaFree(s);
+  CLGS_CUDA_CHECK_ERR();
   return flag;
 }
 
-// CGLS, with pre-initialized cusparseHandle and cublasHandle.
-template <typename T, CGLS_ORD F>
-INT solve(cusparseMatDescr_t descr, const T *val, const INT *ptr,
-          const INT *ind, const INT m, const INT n, const INT nnz,
-          const T *b, T *x, const T shift, const T tol, const INT maxit,
-          bool quiet) {
-  cusparseHandle_t handle_s;
-  cublasHandle_t handle_b;
-  cusparseCreate(&handle_s);
-  cublasCreate(&handle_b);
-  int flag = solve<T, F>(handle_s, handle_b, descr, val, ptr, ind, m, n, nnz, b,
-      x, shift, tol, maxit, quiet);
-  cusparseDestroy(handle_s);
-  cublasDestroy(handle_b);
-  return flag;
-}
-
-// CGLS, with pre-initialized cusparseMatDescr, cusparseHandle and cublasHandle.
-template <typename T, CGLS_ORD F>
-INT solve(const T *val, const INT *ptr, const INT *ind, const INT m,
+// Sparse CGLS.
+template <typename T, CGLS_ORD O>
+int Solve(const T *val, const INT *ptr, const INT *ind, const INT m,
           const INT n, const INT nnz, const T *b, T *x, const T shift,
-          const T tol, const INT maxit, bool quiet) {
-  cusparseHandle_t handle_s;
-  cublasHandle_t handle_b;
-  cusparseMatDescr_t descr;
-  cusparseCreate(&handle_s);
-  cublasCreate(&handle_b);
-  cusparseCreateMatDescr(&descr);
-  int flag = solve<T, F>(handle_s, handle_b, descr, val, ptr, ind, m, n, nnz, b,
-      x, shift, tol, maxit, quiet);
-  cusparseDestroy(handle_s);
-  cublasDestroy(handle_b);
-  cusparseDestroyMatDescr(descr);
-  return flag;
+          const T tol, const int maxit, bool quiet) {
+  cublasHandle_t handle;
+  cublasCreate(&handle);
+  CLGS_CUDA_CHECK_ERR();
+
+  Spmv<T, O> A(m, n, nnz, val, ptr, ind);
+  int status = Solve(handle, A, m, n, nnz, b, x, shift, tol, maxit, quiet);
+
+  cublasDestroy(handle);
+  CLGS_CUDA_CHECK_ERR();
+  return status;
 }
 
-// This version requires both A and A^T
-template <typename T, CGLS_ORD F>
-INT solve(cusparseHandle_t handle_s, cublasHandle_t handle_b,
-          cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
-          const INT *ind_a, const T *val_at, const INT *ptr_at,
-          const INT *ind_at, const INT m, const INT n, const INT nnz,
-          const T *b, T *x, const T shift, const T tol, const INT maxit,
-          bool quiet) {
-  // Variable declarations.
-  T *p, *q, *r, *s;
-  T gamma, normp, normq, norms, norms0, normx, xmax;
-  char fmt[] = "%5d %9.2e %12.5g\n";
-  INT k, flag = 0, indefinite = 0;
-
-  // Constant declarations.
-  const T kNegOne = static_cast<T>(-1);
-  const T kZero = static_cast<T>(0);
-  const T kOne = static_cast<T>(1);
-  const T kNegShift = static_cast<T>(-shift);
-  const T kEps = static_cast<T>(1e-16);
-
-  // Memory Allocation.
-  cudaMalloc(&p, n * sizeof(T));
-  cudaMalloc(&q, m * sizeof(T));
-  cudaMalloc(&r, m * sizeof(T));
-  cudaMalloc(&s, n * sizeof(T));
-
-  cudaMemcpy(r, b, m * sizeof(T), cudaMemcpyDeviceToDevice);
-  cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
-
-  // r = b - A*x.
-  spmv<T, F>(handle_s, CUSPARSE_OPERATION_NON_TRANSPOSE, m, n, nnz, &kNegOne,
-      descr, val_a, ptr_a, ind_a, x, &kOne, r);
-  cudaDeviceSynchronize();
-
-  // s = A'*r - shift*x.
-  spmv<T, F>(handle_s, CUSPARSE_OPERATION_NON_TRANSPOSE, n, m, nnz, &kOne,
-      descr, val_at, ptr_at, ind_at, r, &kNegShift, s);
-
-  // Initialize.
-  cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
-  nrm2(n, s, &norms);
-  nrm2(n, x, &normx);
-  cudaDeviceSynchronize();
-  norms0 = norms;
-  gamma = norms0 * norms0;
-  xmax = normx;
-
-  if (norms < kEps)
-    flag = 1;
-
-  if (!quiet && !flag)
-    printf("    k     normx        resNE\n");
-
-  for (k = 0; k < maxit && !flag; ++k) {
-    // q = A * p.
-    spmv<T, F>(handle_s, CUSPARSE_OPERATION_NON_TRANSPOSE, m, n, nnz, &kOne,
-        descr, val_a, ptr_a, ind_a, p, &kZero, q);
-    cudaDeviceSynchronize();
-
-    // delta = norm(p)^2 + shift*norm(q)^2.
-    nrm2(n, p, &normp);
-    nrm2(m, q, &normq);
-    cudaDeviceSynchronize();
-    T delta = normq * normq + shift * normp * normp;
-
-    if (delta <= 0)
-      indefinite = 1;
-    if (delta == 0)
-      delta = kEps;
-    T alpha = gamma / delta;
-    T neg_alpha = -alpha;
-
-    // x = x + alpha*p.
-    // r = r - alpha*q.
-    axpy(handle_b, n, &alpha, p, 1, x,  1);
-    axpy(handle_b, m, &neg_alpha, q, 1, r,  1);
-
-    // s = A'*r - shift*x.
-    cudaMemcpy(s, x, n * sizeof(T), cudaMemcpyDeviceToDevice);
-    spmv<T, F>(handle_s, CUSPARSE_OPERATION_NON_TRANSPOSE, n, m, nnz, &kOne,
-        descr, val_at, ptr_at, ind_at, r, &kNegShift, s);
-    cudaDeviceSynchronize();
-
-    // Compute beta.
-    nrm2(n, s, &norms);
-    cudaDeviceSynchronize();
-    T gamma1 = gamma;
-    gamma = norms * norms;
-    T beta = gamma / gamma1;
-
-    // p = s + beta*p.
-    axpy(handle_b, n, &beta, p, 1, s, 1);
-    cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
-
-    // Convergence check.
-    nrm2(n, x, &normx);
-    xmax = std::max(xmax, normx);
-    bool converged = (norms <= norms0 * tol) || (normx * tol >= 1);
-    if (!quiet && (converged || k % 10 == 0))
-      printf(fmt, k, normx, norms / norms0);
-    if (converged)
-      break;
-  }
-
-  // Determine exit status.
-  T shrink = normx / xmax;
-  if (k == maxit)
-    flag = 2;
-  else if (indefinite)
-    flag = 3;
-  else if (shrink * shrink <= tol)
-    flag = 4;
-
-  // Free variables and return;
-  cudaFree(p);
-  cudaFree(q);
-  cudaFree(r);
-  cudaFree(s);
-  return flag;
-}
-
-// CGLS, with pre-initialized cusparseHandle and cublasHandle.
-template <typename T, CGLS_ORD F>
-INT solve(cusparseMatDescr_t descr, const T *val_a, const INT *ptr_a,
-          const INT *ind_a, const T *val_at, const INT *ptr_at,
-          const INT *ind_at, const INT m, const INT n, const INT nnz,
-          const T *b, T *x, const T shift, const T tol, const INT maxit,
-          bool quiet) {
-  cusparseHandle_t handle_s;
-  cublasHandle_t handle_b;
-  cusparseCreate(&handle_s);
-  cublasCreate(&handle_b);
-  int flag = solve<T, F>(handle_s, handle_b, descr, val_a, ptr_a, ind_a, val_at,
-      ptr_at, ind_at, m, n, nnz, b, x, shift, tol, maxit, quiet);
-  cusparseDestroy(handle_s);
-  cublasDestroy(handle_b);
-  return flag;
-}
-
-// CGLS, with pre-initialized cusparseMatDescr, cusparseHandle and cublasHandle.
-template <typename T, CGLS_ORD F>
-INT solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
-          const INT *ptr_at, INT *ind_at, const INT m, const INT n,
+// Sparse CGLS with both A and A^T.
+template <typename T, CGLS_ORD O>
+int Solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
+          const INT *ptr_at, const INT *ind_at, const INT m, const INT n,
           const INT nnz, const T *b, T *x, const T shift, const T tol,
-          const INT maxit, bool quiet) {
-  cusparseHandle_t handle_s;
-  cublasHandle_t handle_b;
-  cusparseMatDescr_t descr;
-  cusparseCreate(&handle_s);
-  cublasCreate(&handle_b);
-  cusparseCreateMatDescr(&descr);
-  int flag = solve<T, F>(handle_s, handle_b, descr, val_a, ptr_a, ind_a, val_at,
-      ptr_at, ind_at, m, n, nnz, b, x, shift, tol, maxit, quiet);
-  cusparseDestroy(handle_s);
-  cublasDestroy(handle_b);
-  cusparseDestroyMatDescr(descr);
-  return flag;
+          const int maxit, bool quiet) {
+
+  cublasHandle_t handle;
+  cublasCreate(&handle);
+  CLGS_CUDA_CHECK_ERR();
+
+  SpmvNT<T, O> A(m, n, nnz, val_a, ptr_a, ind_a, val_at, ptr_at, ind_at);
+  int status = Solve(handle, A, m, n, nnz, b, x, shift, tol, maxit, quiet);
+
+  cublasDestroy(handle);
+  CLGS_CUDA_CHECK_ERR();
+  return status;
 }
 
 }  // namespace cgls

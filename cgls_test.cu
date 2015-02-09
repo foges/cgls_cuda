@@ -41,10 +41,10 @@ void test1() {
 
   // Initialize data.
   real_t val_h[]  = { 1, -1, -3, -2,  5,  4,  6,  4, -4,  2,  7,  8, -5};
-  int cind_h[]   = {0, 1, 3, 0, 1, 2, 3, 4, 0, 2, 3, 1, 4};
-  int rptr_h[]   = {0, 3, 5, 8, 11, 13};
+  int cind_h[]    = {0, 1, 3, 0, 1, 2, 3, 4, 0, 2, 3, 1, 4};
+  int rptr_h[]    = {0, 3, 5, 8, 11, 13};
   real_t b_h[]    = {-2, -1,  0,  1,  2};
-  real_t x_h[]    = {0,  0,  0,  0,  0};
+  real_t x_h[]    = { 0,  0,  0,  0,  0};
   real_t x_star[] = { 0.461620337853983,  0.025458521291462, -0.509793131412600,
                       0.579159637092979, -0.350590484189795};
 
@@ -65,7 +65,7 @@ void test1() {
   cudaMemcpy(rptr_d, rptr_h, (m + 1) * sizeof(int), cudaMemcpyHostToDevice);
 
   // Solve.
-  int flag = cgls::solve<real_t, cgls::CSR>(val_d, rptr_d, cind_d, m, n,
+  int flag = cgls::Solve<real_t, cgls::CSR>(val_d, rptr_d, cind_d, m, n,
       nnz, b_d, x_d, shift, tol, maxit, quiet);
 
   // Retrieve solution.
@@ -104,13 +104,13 @@ void test2() {
                       0.140300920195852,  0.745416695810262, -0.949513158012032,
                       0.753179647233809,  0.117556530400676, -1.458256332931324,
                      -0.742412119936071, -0.269214611464301};
-  int cind_h[] = {0, 1, 2, 3, 2, 3, 3, 4, 0, 1, 0, 2, 3, 1, 4, 4, 0};
-  int rptr_h[] = {0, 4, 6, 6, 8, 10, 13, 14, 15, 16, 17};
+  int cind_h[]    = {0, 1, 2, 3, 2, 3, 3, 4, 0, 1, 0, 2, 3, 1, 4, 4, 0};
+  int rptr_h[]    = {0, 4, 6, 6, 8, 10, 13, 14, 15, 16, 17};
   real_t b_h[]    = { 1.340034585145723, -0.634242023306306, -0.213297722346186,
                      -0.129598039513105,  0.132020354623637,  0.078143427011308,
                       0.300482010299278, -0.688536305275490, -0.465698657933079,
                       0.074768275950993};
-  real_t x_h[]    = {0, 0, 0, 0, 0};
+  real_t x_h[]    = { 0,  0,  0,  0,  0};
   real_t x_star[] = { 0.066707422952301,  0.308024162523591, -0.843805757764051,
                      -1.276669375807300,  0.577067691426442};
 
@@ -131,7 +131,7 @@ void test2() {
   cudaMemcpy(rptr_d, rptr_h, (m + 1) * sizeof(int), cudaMemcpyHostToDevice);
 
   // Solve.
-  int flag = cgls::solve<real_t, cgls::CSR>(val_d, rptr_d, cind_d, m, n,
+  int flag = cgls::Solve<real_t, cgls::CSR>(val_d, rptr_d, cind_d, m, n,
       nnz, b_d, x_d, shift, tol, maxit, quiet);
 
   // Retrieve solution.
@@ -154,10 +154,13 @@ void test2() {
 
 // Test CGLS on larger random matrix.
 void test3() {
+  // Reset random seed.
+  srand(0);
+
   // Initialize variables.
   real_t shift = 1;
   real_t tol = 1e-6;
-  int maxit = 100;
+  int maxit = 30;
   bool quiet = false;
   int m = 100;
   int n = 1000;
@@ -168,38 +171,49 @@ void test3() {
   int *cind_h = new int[nnz];
   int *rptr_h = new int[m + 1];
   real_t *b_h = new real_t[m];
-  real_t *x_h = new real_t[n]();
+  real_t *x1_h = new real_t[n]();
+  real_t *x2_h = new real_t[n]();
+  real_t *x3_h = new real_t[n]();
+  real_t *x4_h = new real_t[n]();
 
   // Generate data.
   CsrMatGen(m, n, nnz, val_h, rptr_h, cind_h);
   for (int i = 0; i < m; ++i)
     b_h[i] = rand() / static_cast<real_t>(RAND_MAX);
 
-  // Transfer variables to device.
-  real_t *val_a_d, *b_d, *x_d;
-  int *cind_a_d, *rptr_a_d;
-
-  cudaMalloc(&val_a_d, nnz * sizeof(real_t));
-  cudaMalloc(&x_d, n * sizeof(real_t));
+  // Allocate x and b
+  real_t *b_d, *x1_d, *x2_d, *x3_d, *x4_d;
+  cudaMalloc(&x1_d, n * sizeof(real_t));
+  cudaMalloc(&x2_d, n * sizeof(real_t));
+  cudaMalloc(&x3_d, n * sizeof(real_t));
+  cudaMalloc(&x4_d, n * sizeof(real_t));
   cudaMalloc(&b_d, m * sizeof(real_t));
+
+  // Allocate A
+  real_t *val_a_d;
+  int *cind_a_d, *rptr_a_d;
+  cudaMalloc(&val_a_d, nnz * sizeof(real_t));
   cudaMalloc(&cind_a_d, nnz * sizeof(int));
   cudaMalloc(&rptr_a_d, (m + 1) * sizeof(int));
 
-  cudaMemcpy(val_a_d, val_h, nnz * sizeof(real_t), cudaMemcpyHostToDevice);
+  // Allocate A^T
+  real_t *val_at_d;
+  int *cind_at_d, *rptr_at_d;
+  cudaMalloc(&val_at_d, nnz * sizeof(real_t));
+  cudaMalloc(&cind_at_d, nnz * sizeof(int));
+  cudaMalloc(&rptr_at_d, (n + 1) * sizeof(int));
+
+  // Transfer all data to device.
   cudaMemcpy(b_d, b_h, m * sizeof(real_t), cudaMemcpyHostToDevice);
-  cudaMemcpy(x_d, x_h, n * sizeof(real_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(x1_d, x1_h, n * sizeof(real_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(x2_d, x2_h, n * sizeof(real_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(x3_d, x3_h, n * sizeof(real_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(x4_d, x4_h, n * sizeof(real_t), cudaMemcpyHostToDevice);
+  cudaMemcpy(val_a_d, val_h, nnz * sizeof(real_t), cudaMemcpyHostToDevice);
   cudaMemcpy(cind_a_d, cind_h, nnz * sizeof(int), cudaMemcpyHostToDevice);
   cudaMemcpy(rptr_a_d, rptr_h, (m + 1) * sizeof(int), cudaMemcpyHostToDevice);
 
   // Make A^T copy.
-  real_t *val_at_d;
-  int *cind_at_d, *rptr_at_d;
-
-  cudaMalloc(&val_at_d, nnz * sizeof(real_t));
-  cudaMalloc(&cind_at_d, nnz * sizeof(int));
-  cudaMalloc(&rptr_at_d, (n + 1) * sizeof(int));
-  rptr_at_d = cind_at_d + nnz;
-
   cusparseHandle_t handle_s;
   cusparseCreate(&handle_s);
   csr2csc(handle_s, m, n, nnz, val_a_d, rptr_a_d, cind_a_d, val_at_d,
@@ -208,26 +222,67 @@ void test3() {
   cudaDeviceSynchronize();
   cusparseDestroy(handle_s);
 
-  // Solve.
-  int flag = cgls::solve<real_t, cgls::CSR>(val_a_d, rptr_a_d, cind_a_d,
-      val_at_d, rptr_at_d, cind_at_d, m, n, nnz, b_d, x_d, shift, tol, maxit,
+  // Solve with only A.
+  int flag1 = cgls::Solve<real_t, cgls::CSR>(val_a_d, rptr_a_d, cind_a_d,
+      m, n, nnz, b_d, x1_d, shift, tol, maxit, quiet);
+  int flag2 = cgls::Solve<real_t, cgls::CSC>(val_at_d, rptr_at_d, cind_at_d,
+      m, n, nnz, b_d, x2_d, shift, tol, maxit, quiet);
+
+  // Solve with A and A^T.
+  int flag3 = cgls::Solve<real_t, cgls::CSR>(val_a_d, rptr_a_d, cind_a_d,
+      val_at_d, rptr_at_d, cind_at_d, m, n, nnz, b_d, x3_d, shift, tol, maxit,
+      quiet);
+  int flag4 = cgls::Solve<real_t, cgls::CSC>(val_at_d, rptr_at_d, cind_at_d,
+      val_a_d, rptr_a_d, cind_a_d, m, n, nnz, b_d, x4_d, shift, tol, maxit,
       quiet);
 
-  // Check Result
-  if (flag == 0)
-    printf("Test3 Passed: Flag = %d\n", flag);
-  else
-    printf("Test3 Failed: Flag = %d\n", flag);
+  // Retrieve solution.
+  cudaMemcpy(x1_h, x1_d, n * sizeof(real_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(x2_h, x2_d, n * sizeof(real_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(x3_h, x3_d, n * sizeof(real_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(x4_h, x4_d, n * sizeof(real_t), cudaMemcpyDeviceToHost);
+
+  // Compute error and print.
+  real_t err1 = 0, err2 = 0, err3 = 0;
+  for (int i = 0; i < n; ++i)
+    err1 += (x1_h[i] - x2_h[i]) * (x1_h[i] - x2_h[i]);
+  err1 = std::sqrt(err1);
+  for (int i = 0; i < n; ++i)
+    err2 += (x1_h[i] - x3_h[i]) * (x1_h[i] - x3_h[i]);
+  err2 = std::sqrt(err2);
+  for (int i = 0; i < n; ++i)
+    err3 += (x1_h[i] - x4_h[i]) * (x1_h[i] - x4_h[i]);
+  err3 = std::sqrt(err3);
+
+  if (flag1 == 0 && flag2 == 0 && flag3 == 0 && flag4 == 0
+      && err1 < tol && err2 < tol && err3 < tol) {
+    printf("Test3 Passed: Flag = (%d, %d, %d, %d), Error = (%e, %e, %e)\n",
+        flag1, flag2, flag3, flag4, err1, err2, err3);
+  } else {
+    printf("Test3 Failed: Flag = (%d, %d, %d, %d), Error = (%e, %e, %e)\n",
+        flag1, flag2, flag3, flag4, err1, err2, err3);
+  }
 
   // Free data.
+  cudaFree(b_d);
+  cudaFree(x1_d);
+  cudaFree(x2_d);
+  cudaFree(x3_d);
+  cudaFree(x4_d);
+
   cudaFree(val_a_d);
   cudaFree(cind_a_d);
+  cudaFree(rptr_a_d);
+
   cudaFree(val_at_d);
   cudaFree(cind_at_d);
+  cudaFree(rptr_at_d);
+
   delete [] val_h;
   delete [] rptr_h;
   delete [] cind_h;
-  delete [] x_h;
+  delete [] x1_h;
+  delete [] x2_h;
   delete [] b_h;
 }
 
