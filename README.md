@@ -7,7 +7,7 @@ This is a CUDA implementation of [CGLS](http://web.stanford.edu/group/SOL/softwa
 minimize ||Ax - b||_2^2 + s ||x||_2^2,
 ```
 
-by using the [Conjugate Gradient method](http://en.wikipedia.org/wiki/Conjugate_gradient_method) (CG). It is more numerically stable than simply applying CG to the normal equations. The implementation supports both CSR and CSC matrices in single and double precision. 
+by using the [Conjugate Gradient method](http://en.wikipedia.org/wiki/Conjugate_gradient_method) (CG). It is more numerically stable than simply applying CG to the normal equations. The implementation supports both CSR and CSC matrices in single and double precision, as well as abstract operators for computing `Ax` and `A^Tx`. 
 
 ####Performance
 
@@ -21,14 +21,15 @@ CGLS was run on two of the largest non-square matrices in [Tim Davis' sparse mat
 In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e-6`, and the arithmetic was performed in double precision.
 
 
-####Example Usage
+####Example Usage - CSR Matrix
 
 To solve a least squares problem where the matrix is stored in double precision CSR format, use the syntax
 
 ```
-cgls::solve<double, cgls::CSR>(val, rptr, cind, m, n, nnz, b, x, s, tol, maxit, quiet)
+cgls::Solve<double, cgls::CSR>(val, rptr, cind, m, n, nnz, b, x, s, tol, maxit, quiet)
 ```
 The arguments are (note that all arrays must be in GPU memory):
+
   + `(double*) val`: Array of matrix entries. The length should be `nnz`.
   + `(int*) rptr`: Array of row pointers. The length should be `m+1`.
   + `(int*) cind`: Array of column indicies. The length should be `nnz`.
@@ -41,7 +42,40 @@ The arguments are (note that all arrays must be in GPU memory):
   + `(double) tol`: Relative tolerance to which the problem should be solved (recommended 1e-6).
   + `(int) maxit`: Maximum number of iterations before the solver stops (recommended 20-100, but it depends heavily on the condition number of `A`).
   + `(bool) quiet`: Disables output to the console if set to `true`.
+  
+####Example Usage - Abstract Operator
 
+CGLS can also be used if you have an abstract operator that computes `Ax` and `A^Tx`. To do so, you must define a GEMV-like functor that inherits from the abstract class `cgls::Gemv`
+
+```
+template <typename T>
+struct Gemv {
+  virtual int operator()(char op, const T alpha, const T *x, const T beta, T *y) = 0;
+};
+```
+When invoked, the functor should compute `y := alpha*op(A)x + beta*y`, where `op` is either `'n'` or `'t'` (corresponding to `Ax` and `A^Tx`). The functor should return a non-zero value if unsuccessful and a `0` if the operation succeeded. Once the functor is defined, you can invoke `CGLS` with the 
+
+```
+cgls::Solve(cublas_handle, A, m, n, b, x, shift, tol, maxit, quiet);
+```
+
+The arguments are (note that all arrays must be in GPU memory):
+
+  + `(cublasHandle_t) cublas_handle`: An initialized cuBLAS handle.
+  + `(const cgls::Gemv<double>&) A`: An instance of the abstract operator.
+  + ... (the rest of the arguments are the same as above).
+  
+####Return values
+
+Upon exit, CGLS will have modified the `x` argument and return an `int` flag corresponding to one of the error codes
+
+    0 : CGLS converged to the desired tolerance tol within maxit iterations.
+    1 : The vector b had norm less than eps, solution likely x = 0.
+    2 : CGLS iterated maxit times but did not converge.
+    3 : Matrix (A'*A + shift*I) seems to be singular or indefinite.
+    4 : Likely instable, (A'*A + shift*I) indefinite and norm(x) decreased.
+    5 : Error in applying operator A.
+    6 : Error in applying operator A^T.
 
 ####Requirements
 
@@ -53,4 +87,4 @@ Clone the repository and type `make test`. It should work out of the box if you'
 
 ####Acknowledgement
 
-The code is based on an implementation by Michael Saunders.
+The code is based on an implementation by Michael Saunders. Matlab code can be found on the [Stanford Systems Optimization Lab - CGLS website](http://web.stanford.edu/group/SOL/software/cgls/).

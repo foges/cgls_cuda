@@ -139,6 +139,15 @@ enum CGLS_ORD { CSC, CSR };
 // changes their API (a la MKL).
 typedef int INT;
 
+// Abstract GEMV-like operator.
+template <typename T>
+struct Gemv {
+  virtual ~Gemv() { };
+  virtual int operator()(char op, const T alpha, const T *x, const T beta,
+                         T *y) const = 0;
+};
+
+// File-level functions and classes.
 namespace {
 
 // Converts 'n' or 't' to a cusparseOperation_t variable.
@@ -150,7 +159,7 @@ cusparseOperation_t OpToCusparseOp(char op) {
 
 // Sparse matrix-vector multiply templates.
 template <typename T, CGLS_ORD O>
-class Spmv {
+class Spmv : Gemv<T> {
  private:
   cusparseHandle_t _handle;
   cusparseMatDescr_t _descr;
@@ -220,7 +229,7 @@ int Spmv<float, CSC>::operator()(char op, const float alpha, const float *x,
 
 // Class for sparse matrix and its transpose.
 template <typename T, CGLS_ORD O>
-class SpmvNT {
+class SpmvNT : Gemv<T> {
  private:
   Spmv<T, O> A;
   Spmv<T, O> At;
@@ -268,7 +277,7 @@ cublasStatus_t axpy(cublasHandle_t handle, INT n, float *alpha,
 template <typename T>
 struct Square : thrust::unary_function<T, T> {
   __device__ T operator()(const T &x) {
-    return x * x;
+    return abs(x) * abs(x);
   }
 };
 
@@ -285,8 +294,8 @@ void nrm2(INT n, const T *x, T *result) {
 // Conjugate Gradient Least Squares.
 template <typename T, typename F>
 int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
-          const INT nnz, const T *b, T *x, const T shift, const T tol,
-          const int maxit, bool quiet) {
+          const T *b, T *x, const T shift, const T tol, const int maxit,
+          bool quiet) {
   // Variable declarations.
   T *p, *q, *r, *s;
   T gamma, normp, normq, norms, norms0, normx, xmax;
@@ -442,7 +451,7 @@ int Solve(const T *val, const INT *ptr, const INT *ind, const INT m,
   CLGS_CUDA_CHECK_ERR();
 
   Spmv<T, O> A(m, n, nnz, val, ptr, ind);
-  int status = Solve(handle, A, m, n, nnz, b, x, shift, tol, maxit, quiet);
+  int status = Solve(handle, A, m, n, b, x, shift, tol, maxit, quiet);
 
   cublasDestroy(handle);
   CLGS_CUDA_CHECK_ERR();
@@ -461,7 +470,7 @@ int Solve(const T *val_a, const INT *ptr_a, const INT *ind_a, const T *val_at,
   CLGS_CUDA_CHECK_ERR();
 
   SpmvNT<T, O> A(m, n, nnz, val_a, ptr_a, ind_a, val_at, ptr_at, ind_at);
-  int status = Solve(handle, A, m, n, nnz, b, x, shift, tol, maxit, quiet);
+  int status = Solve(handle, A, m, n, b, x, shift, tol, maxit, quiet);
 
   cublasDestroy(handle);
   CLGS_CUDA_CHECK_ERR();
