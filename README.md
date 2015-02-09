@@ -1,4 +1,4 @@
-Conugate Gradient for Least Squares in CUDA
+Conjugate Gradient for Least Squares in CUDA
 ===========================================
 
 This is a CUDA implementation of [CGLS](http://web.stanford.edu/group/SOL/software/cgls) for sparse matrices. CGLS solves problem
