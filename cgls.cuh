@@ -232,18 +232,16 @@ class SpmvNT {
         At(n, m, nnz, val_at, ptr_at, ind_at) { }
   int operator()(char op, const T alpha, const T *x, const T beta, T *y) const {
     switch (O) {
-      case CSR: {
+      case CSR:
         if (op == 'n' || op == 'N')
           return A('n', alpha, x, beta, y);
         else
           return At('n', alpha, x, beta, y);
-      }
-      case CSC: {
+      case CSC:
         if (op == 'n' || op == 'N')
           return At('t', alpha, x, beta, y);
         else
           return A('t', alpha, x, beta, y);
-      }
       default:
         assert(false);
         return 1;
