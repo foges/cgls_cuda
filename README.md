@@ -45,7 +45,7 @@ The arguments are (note that all arrays must be in GPU memory):
   
 ####Example Usage - Abstract Operator
 
-CGLS can also be used if you have an abstract operator that computes `Ax` and `A^Tx`. To do so, you must define a GEMV-like functor that inherits from the abstract class `cgls::Gemv`
+You may also want to use CGLS if you have an abstract operator that computes `Ax` and `A^Tx`. To do so, define a GEMV-like functor that inherits from the abstract class
 
 ```
 template <typename T>
@@ -53,13 +53,13 @@ struct Gemv {
   virtual int operator()(char op, const T alpha, const T *x, const T beta, T *y) = 0;
 };
 ```
-When invoked, the functor should compute `y := alpha*op(A)x + beta*y`, where `op` is either `'n'` or `'t'` (corresponding to `Ax` and `A^Tx`). The functor should return a non-zero value if unsuccessful and a `0` if the operation succeeded. Once the functor is defined, you can invoke `CGLS` with the 
+When invoked, the functor should compute `y := alpha*op(A)x + beta*y`, where `op` is either `'n'` or `'t'` (corresponding to `Ax` and `A^Tx`). The functor should return a non-zero value if unsuccessful and 0 if the operation succeeded. Once the functor is defined, you can invoke `CGLS` with 
 
 ```
 cgls::Solve(cublas_handle, A, m, n, b, x, shift, tol, maxit, quiet);
 ```
 
-The arguments are (note that all arrays must be in GPU memory):
+The arguments are:
 
   + `(cublasHandle_t) cublas_handle`: An initialized cuBLAS handle.
   + `(const cgls::Gemv<double>&) A`: An instance of the abstract operator.
@@ -79,7 +79,7 @@ Upon exit, CGLS will have modified the `x` argument and return an `int` flag cor
 
 ####Requirements
 
-You will need a CUDA capable GPU along with the CUDA SDK installed on your computer. We use the  cuSPARSE and cuBLAS libraries.
+You will need a CUDA capable GPU along with the CUDA SDK installed on your computer. We use the  cuSPARSE and cuBLAS libraries, which are part of the CUDA SDK.
 
 ####Instructions
 
