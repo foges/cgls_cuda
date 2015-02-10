@@ -7,7 +7,7 @@ This is a CUDA implementation of [CGLS](http://web.stanford.edu/group/SOL/softwa
 minimize ||Ax - b||_2^2 + s ||x||_2^2,
 ```
 
-by using the [Conjugate Gradient method](http://en.wikipedia.org/wiki/Conjugate_gradient_method) (CG). It is more numerically stable than simply applying CG to the normal equations. The implementation supports both CSR and CSC matrices in single and double precision, as well as abstract operators for computing `Ax` and `A^Tx`. 
+by using the [Conjugate Gradient method](http://en.wikipedia.org/wiki/Conjugate_gradient_method) (CG). It is more numerically stable than simply applying CG to the normal equations. The implementation supports any combination of real and complex valued matrices, CSR and CSC format, and single and double precision. Additionally abstract operators for computing `Ax` and `A^Tx` may be used instead of sparse matrices.
 
 ####Performance
 
@@ -23,7 +23,7 @@ In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e
 
 ####Example Usage - CSR Matrix
 
-To solve a least squares problem where the matrix is stored in double precision CSR format, use the syntax
+To solve a least squares problem where the matrix is real-valued, and stored in double precision CSR format, use the syntax
 
 ```
 cgls::Solve<double, cgls::CSR>(val, rptr, cind, m, n, nnz, b, x, s, tol, maxit, quiet)
@@ -50,10 +50,11 @@ You may also want to use CGLS if you have an abstract operator that computes `Ax
 ```
 template <typename T>
 struct Gemv {
+  virtual ~Gemv() { };
   virtual int operator()(char op, const T alpha, const T *x, const T beta, T *y) = 0;
 };
 ```
-When invoked, the functor should compute `y := alpha*op(A)x + beta*y`, where `op` is either `'n'` or `'t'` (corresponding to `Ax` and `A^Tx`). The functor should return a non-zero value if unsuccessful and 0 if the operation succeeded. Once the functor is defined, you can invoke `CGLS` with 
+When invoked, the functor should compute `y := alpha*op(A)x + beta*y`, where `op` is either `'n'` or `'t'`, corresponding to `Ax` and `A^Tx` (or `A^Hx` in the complex case). The functor should return a non-zero value if unsuccessful and 0 if the operation succeeded. Once the functor is defined, you can invoke `CGLS` with 
 
 ```
 cgls::Solve(cublas_handle, A, m, n, b, x, shift, tol, maxit, quiet);
