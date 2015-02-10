@@ -8,6 +8,10 @@ typedef double real_t;
 typedef cuDoubleComplex complex_t;
 #define csr2csc cusparseDcsr2csc
 #define makeComplex make_cuDoubleComplex
+// #define csr2csc cusparseScsr2csc
+// typedef float real_t;
+// typedef cuFloatComplex complex_t;
+// #define makeComplex make_cuFloatComplex
 
 // Generates random CSR matrix with entries in [-1, 1]. The matrix will have
 // exactly nnz non-zeros. All arrays must be pre-allocated.
@@ -157,7 +161,7 @@ void test2() {
 // Test complex value entries.
 void test3() {
   // Initialize variables.
-  double shift = 1.;
+  double shift = 0.;
   double tol   = 1e-6;
   int maxit = 20;
   bool quiet = false;
@@ -166,26 +170,26 @@ void test3() {
   int nnz = 13;
 
   // Initialize data.
-  complex_t val_h[]  = {makeComplex( 1, 0), makeComplex(-1, 0),
-                        makeComplex(-3, 0), makeComplex(-2, 0),
+  complex_t val_h[]  = {makeComplex( 1, 0), makeComplex(-1, 2),
+                        makeComplex(-3,-1), makeComplex(-2, 0),
                         makeComplex( 5, 0), makeComplex( 4, 0),
                         makeComplex( 6, 0), makeComplex( 4, 0),
-                        makeComplex(-4, 0), makeComplex( 2, 0),
-                        makeComplex( 7, 0), makeComplex( 8, 0),
-                        makeComplex(-5, 0)};
+                        makeComplex(-4,-9), makeComplex( 2, 8),
+                        makeComplex( 7, 1), makeComplex( 8,-1),
+                        makeComplex(-5, 1)};
   int cind_h[]       = {0, 1, 3, 0, 1, 2, 3, 4, 0, 2, 3, 1, 4};
   int rptr_h[]       = {0, 3, 5, 8, 11, 13};
-  complex_t b_h[]    = {makeComplex(-2, 0), makeComplex(-1, 0),
-                        makeComplex( 0, 0), makeComplex( 1, 0),
-                        makeComplex( 2, 0)};
+  complex_t b_h[]    = {makeComplex(-2, 2), makeComplex(-1, 1),
+                        makeComplex( 0, 0), makeComplex( 1,-1),
+                        makeComplex( 2,-2)};
   complex_t x_h[]    = {makeComplex(0, 0), makeComplex(0, 0),
                         makeComplex(0, 0), makeComplex(0, 0),
                         makeComplex(0, 0), makeComplex(0, 0)};
-  complex_t x_star[] = {makeComplex( 0.461620337853983, 0),
-                        makeComplex( 0.025458521291462, 0),
-                        makeComplex(-0.509793131412600, 0),
-                        makeComplex( 0.579159637092979, 0),
-                        makeComplex(-0.350590484189795, 0)};
+  complex_t x_star[] = {makeComplex(-0.071825167171859, 0.239919551228792),
+                        makeComplex(-0.228730066868743, 0.295967820491517),
+                        makeComplex( 0.529168409532377, 0.617805307097713),
+                        makeComplex( 0.218139937314134,-0.910549446771449),
+                        makeComplex(-0.856378315503578, 0.748018863059460)};
 
   // Transfer variables to device.
   complex_t *val_d, *b_d, *x_d;
