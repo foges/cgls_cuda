@@ -41,9 +41,9 @@
 //  T          - Data type (float or double).
 //
 //  F          - Generic GEMV-like functor type with signature
-//               int gemv(char op, T alpha, const T *x, T beta, T *y). Upon exit,
-//               y should take on the value y := alpha*op(A)x + beta*y. If
-//               successful the functor must return 0, otherwise a non-zero
+//               int gemv(char op, T alpha, const T *x, T beta, T *y). Upon
+//               exit, y should take on the value y := alpha*op(A)x + beta*y.
+//               If successful the functor must return 0, otherwise a non-zero
 //               value should be returned.
 //
 //  Function Arguments:
@@ -126,6 +126,10 @@
 
 #include <algorithm>
 #include <limits>
+
+// Macro to distinguish between cublas and thrust nrm2.
+#define CGLS_USE_CUBLAS_NRM2
+//#define CGLS_DISABLE_ERROR_CHECK
 
 // Macro to check for CUDA errors.
 #ifndef CGLS_DISABLE_ERROR_CHECK
@@ -368,12 +372,39 @@ inline cublasStatus_t axpy(cublasHandle_t handle, INT n, cuFloatComplex *alpha,
   return err;
 }
 
+#ifdef CGLS_USE_CUBLAS_NRM2
+// cuBLAS nrm2 implementation.
+void nrm2(cublasHandle_t hdl, INT n, const double *x, double *result) {
+  cublasDnrm2(hdl, n, x, static_cast<INT>(1), result);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+void nrm2(cublasHandle_t hdl, INT n, const float *x, double *result) {
+  float result_float;
+  cublasSnrm2(hdl, n, x, static_cast<INT>(1), &result_float);
+  *result = static_cast<double>(result_float);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+void nrm2(cublasHandle_t hdl, INT n, const cuDoubleComplex *x, double *result) {
+  cublasDznrm2(hdl, n, x, static_cast<INT>(1), result);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+void nrm2(cublasHandle_t hdl, INT n, const cuFloatComplex *x, double *result) {
+  float result_float;
+  cublasScnrm2(hdl, n, x, static_cast<INT>(1), &result_float);
+  *result = static_cast<double>(result_float);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+#else
+
 // 2-Norm based on thrust, potentially not as stable as cuBLAS version.
 template <typename T>
 struct NormSquared : thrust::unary_function<T, double> {
   inline __device__ double operator()(const T &x);
 };
-
 template <>
 inline __device__ double NormSquared<double>::operator()(const double &x) {
   return x * x;
@@ -399,12 +430,13 @@ inline __device__ double NormSquared<cuFloatComplex>::
 }
 
 template <typename T>
-void nrm2(INT n, const T *x, double *result) {
+void nrm2(cublasHandle_t hdl, INT n, const T *x, double *result) {
   *result = sqrt(thrust::transform_reduce(thrust::device_pointer_cast(x),
       thrust::device_pointer_cast(x + n), NormSquared<T>(), 0.,
       thrust::plus<double>()));
   CGLS_CUDA_CHECK_ERR();
 }
+#endif
 
 // Casting from double to float, double, complex_float, and complex_double.
 template <typename T>
@@ -486,8 +518,9 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   CGLS_CUDA_CHECK_ERR();
 
   // r = b - A*x.
-  nrm2(n, x, &normx);
+  nrm2(handle, n, x, &normx);
   cudaDeviceSynchronize();
+  CGLS_CUDA_CHECK_ERR();
   if (normx > 0.) {
     err = A('n', kNegOne, x, kOne, r);
     cudaDeviceSynchronize();
@@ -505,10 +538,10 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
 
   // Initialize.
   cudaMemcpy(p, s, n * sizeof(T), cudaMemcpyDeviceToDevice);
-  nrm2(n, s, &norms);
+  nrm2(handle, n, s, &norms);
   norms0 = norms;
   gamma = norms0 * norms0;
-  nrm2(n, x, &normx);
+  nrm2(handle, n, x, &normx);
   xmax = normx;
   cudaDeviceSynchronize();
   CGLS_CUDA_CHECK_ERR();
@@ -530,8 +563,8 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     }
 
     // delta = norm(p)^2 + shift*norm(q)^2.
-    nrm2(n, p, &normp);
-    nrm2(m, q, &normq);
+    nrm2(handle, n, p, &normp);
+    nrm2(handle, m, q, &normq);
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
     double delta = normq * normq + shift * normp * normp;
@@ -561,7 +594,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     }
 
     // Compute beta.
-    nrm2(n, s, &norms);
+    nrm2(handle, n, s, &norms);
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
     double gamma1 = gamma;
@@ -575,7 +608,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     CGLS_CUDA_CHECK_ERR();
 
     // Convergence check.
-    nrm2(n, x, &normx);
+    nrm2(handle, n, x, &normx);
     cudaDeviceSynchronize();
     CGLS_CUDA_CHECK_ERR();
     xmax = std::max(xmax, normx);
