@@ -13,11 +13,11 @@ by using the [Conjugate Gradient method](http://en.wikipedia.org/wiki/Conjugate_
 
 CGLS was run on two of the largest non-square matrices in [Tim Davis' sparse matrix collection](http://www.cise.ufl.edu/research/sparse/matrices) on an Nvidia Tesla K40c. 
 
-| Matrix Name              |  Dimension      | Non-Zeros      | Iterations | Time  | Time / (Iter * NNZ) |
-|--------------------------|:----------------:|----------------|------------|-------|--------------------|
-| Yoshiyasu.mesh_grid      | (230k, 9k)       | 850k           | 794        | 0.52 s| 0.77 ns            |
-| JGD_GL7d.GL7d18          | (2M, 1.5M)       | 36M            | 77         | 3.7 s | 1.3 ns             |
-| ~U[-1, 1]                | (1M, 950k)       | 250M           | 342        | 95 s  | 1.1 ns             |
+| Matrix name              |  Dimension       | Non-zeros      | Iter. | Time  | Time / (iter * nnz) |
+|--------------------------|:----------------:|----------------|-------|-------|---------------------|
+| Yoshiyasu.mesh_grid      | (230k, 9k)       | 850k           | 794   | 0.52 s| 0.77 ns             |
+| JGD_GL7d.GL7d18          | (2M, 1.5M)       | 36M            | 77    | 3.7 s | 1.3 ns              |
+| ~U[-1, 1]                | (1M, 950k)       | 250M           | 342   | 95 s  | 1.1 ns              |
 
 In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e-6`, and the arithmetic was performed in double precision.
 
