@@ -128,8 +128,8 @@
 #include <limits>
 
 // Macro to distinguish between cublas and thrust nrm2.
-#define CGLS_USE_CUBLAS_NRM2
-//#define CGLS_DISABLE_ERROR_CHECK
+// #define CGLS_USE_THRUST_NRM2
+// #define CGLS_DISABLE_ERROR_CHECK
 
 // Macro to check for CUDA errors.
 #ifndef CGLS_DISABLE_ERROR_CHECK
@@ -372,33 +372,7 @@ inline cublasStatus_t axpy(cublasHandle_t handle, INT n, cuFloatComplex *alpha,
   return err;
 }
 
-#ifdef CGLS_USE_CUBLAS_NRM2
-// cuBLAS nrm2 implementation.
-void nrm2(cublasHandle_t hdl, INT n, const double *x, double *result) {
-  cublasDnrm2(hdl, n, x, static_cast<INT>(1), result);
-  CGLS_CUDA_CHECK_ERR();
-}
-
-void nrm2(cublasHandle_t hdl, INT n, const float *x, double *result) {
-  float result_float;
-  cublasSnrm2(hdl, n, x, static_cast<INT>(1), &result_float);
-  *result = static_cast<double>(result_float);
-  CGLS_CUDA_CHECK_ERR();
-}
-
-void nrm2(cublasHandle_t hdl, INT n, const cuDoubleComplex *x, double *result) {
-  cublasDznrm2(hdl, n, x, static_cast<INT>(1), result);
-  CGLS_CUDA_CHECK_ERR();
-}
-
-void nrm2(cublasHandle_t hdl, INT n, const cuFloatComplex *x, double *result) {
-  float result_float;
-  cublasScnrm2(hdl, n, x, static_cast<INT>(1), &result_float);
-  *result = static_cast<double>(result_float);
-  CGLS_CUDA_CHECK_ERR();
-}
-
-#else
+#ifdef CGLS_USE_THRUST_NRM2
 
 // 2-Norm based on thrust, potentially not as stable as cuBLAS version.
 template <typename T>
@@ -436,29 +410,57 @@ void nrm2(cublasHandle_t hdl, INT n, const T *x, double *result) {
       thrust::plus<double>()));
   CGLS_CUDA_CHECK_ERR();
 }
+
+#else
+
+// cuBLAS nrm2 implementation.
+void nrm2(cublasHandle_t hdl, INT n, const double *x, double *result) {
+  cublasDnrm2(hdl, n, x, static_cast<INT>(1), result);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+void nrm2(cublasHandle_t hdl, INT n, const float *x, double *result) {
+  float result_float;
+  cublasSnrm2(hdl, n, x, static_cast<INT>(1), &result_float);
+  *result = static_cast<double>(result_float);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+void nrm2(cublasHandle_t hdl, INT n, const cuDoubleComplex *x, double *result) {
+  cublasDznrm2(hdl, n, x, static_cast<INT>(1), result);
+  CGLS_CUDA_CHECK_ERR();
+}
+
+void nrm2(cublasHandle_t hdl, INT n, const cuFloatComplex *x, double *result) {
+  float result_float;
+  cublasScnrm2(hdl, n, x, static_cast<INT>(1), &result_float);
+  *result = static_cast<double>(result_float);
+  CGLS_CUDA_CHECK_ERR();
+}
+
 #endif
 
 // Casting from double to float, double, complex_float, and complex_double.
 template <typename T>
-T CastFromDouble(double x);
+T StaticCast(double x);
 
 template <>
-inline double CastFromDouble<double>(double x) {
+inline double StaticCast<double>(double x) {
  return x;
 }
 
 template <>
-inline float CastFromDouble<float>(double x) {
+inline float StaticCast<float>(double x) {
  return static_cast<float>(x);
 }
 
 template <>
-inline cuDoubleComplex CastFromDouble<cuDoubleComplex>(double x) {
+inline cuDoubleComplex StaticCast<cuDoubleComplex>(double x) {
  return make_cuDoubleComplex(x, 0.);
 }
 
 template <>
-inline cuFloatComplex CastFromDouble<cuFloatComplex>(double x) {
+inline cuFloatComplex StaticCast<cuFloatComplex>(double x) {
  return make_cuFloatComplex(x, 0.f);
 }
 
@@ -500,10 +502,10 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
   int err = 0, k = 0, flag = 0, indefinite = 0;
 
   // Constant declarations.
-  const T kNegOne   = CastFromDouble<T>(-1.);
-  const T kZero     = CastFromDouble<T>( 0.);
-  const T kOne      = CastFromDouble<T>( 1.);
-  const T kNegShift = CastFromDouble<T>(-shift);
+  const T kNegOne   = StaticCast<T>(-1.);
+  const T kZero     = StaticCast<T>( 0.);
+  const T kOne      = StaticCast<T>( 1.);
+  const T kNegShift = StaticCast<T>(-shift);
   const double kEps = Epsilon<T>();
 
   // Memory Allocation.
@@ -573,8 +575,8 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
       indefinite = 1;
     if (delta == 0.)
       delta = kEps;
-    T alpha = CastFromDouble<T>(gamma / delta);
-    T neg_alpha = CastFromDouble<T>(-gamma / delta);
+    T alpha = StaticCast<T>(gamma / delta);
+    T neg_alpha = StaticCast<T>(-gamma / delta);
 
     // x = x + alpha*p.
     // r = r - alpha*q.
@@ -599,7 +601,7 @@ int Solve(cublasHandle_t handle, const F& A, const INT m, const INT n,
     CGLS_CUDA_CHECK_ERR();
     double gamma1 = gamma;
     gamma = norms * norms;
-    T beta = CastFromDouble<T>(gamma / gamma1);
+    T beta = StaticCast<T>(gamma / gamma1);
 
     // p = s + beta*p.
     axpy(handle, n, &beta, p, 1, s, 1);
