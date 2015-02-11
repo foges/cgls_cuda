@@ -15,8 +15,8 @@ CGLS was run on two of the largest non-square matrices in [Tim Davis' sparse mat
 
 | Matrix Name              |  Dimensions      | Non-Zeros      | Iterations | Time  |
 |--------------------------|:----------------:|----------------|------------|-------|
-| JGD_GL7d.GL7d18          | (2M, 1.5M)       | 36M            | 77         | 3.7 s |
 | Yoshiyasu.mesh_grid      | (230k, 9k)       | 850k           | 794        | 0.52 s|
+| JGD_GL7d.GL7d18          | (2M, 1.5M)       | 36M            | 77         | 3.7 s |
 | ~U[-1, 1]                | (1M, 950k)       | 250M           | 342        | 95 s  |
 
 In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e-6`, and the arithmetic was performed in double precision.
