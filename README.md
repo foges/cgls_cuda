@@ -19,7 +19,7 @@ CGLS was run on two of the largest non-square matrices in [Tim Davis' sparse mat
 | Yoshiyasu.mesh_grid      | (230k, 9k)       | 850k           | 794        | 0.52 s|
 | ~U[-1, 1]                | (1M, 950k)       | 250M           | 342        | 95 s  |
 
-In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e-6`, and the arithmetic was performed in double precision.
+In each instance there was no shift (i.e. `s = 0`), the tolerance was set to `1e-6`, and the arithmetic was performed in double precision. _Note_, the `~U[-1, 1]` case should be considered an upper bound in terms of sec/iter, since the matrix has no structure, and therefore a worst-case scenario for GPUs.
 
 
 ####Example Usage - CSR Matrix
